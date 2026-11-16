@@ -133,3 +133,14 @@ describe("risposta di Claude", () => {
     expect(r.ideas[0].symbol).toBe("AAPL");
   });
 });
+
+describe("telegram: piu' chat", () => {
+  it("invia a tutte le chat elencate e ignora gli spazi", async () => {
+    const { Telegram, parseChatIds } = await import("@/lib/telegram");
+    expect(parseChatIds(" 1, -100 ,,2 ")).toEqual(["1", "-100", "2"]);
+    const sent: string[] = [];
+    const f = (async (_u: string, init: RequestInit) => { sent.push(JSON.parse(String(init.body)).chat_id); return new Response(JSON.stringify({ ok: true })); }) as unknown as typeof fetch;
+    await new Telegram("tok", "11,22", f).send("ciao");
+    expect(sent).toEqual(["11", "22"]);
+  });
+});

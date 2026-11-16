@@ -53,3 +53,7 @@ La fiducia di ogni idea non è più un valore fisso (50): viene calcolata da `sr
 ## Aggiornamento ogni 15 minuti
 
 Ogni 15 minuti, durante premarket e sessione regolare (USA e Europa, separatamente), il tick aggiorna gli indicatori di tutta la watchlist e dei titoli con idee in attesa, usando il prezzo live, e ricalcola la fiducia delle idee di acquisto in attesa (la parte di Claude resta quella originale, quella tecnica è aggiornata). L'autopilot, che gira subito dopo nello stesso tick, decide quindi su dati con al massimo 15 minuti. Non usa Claude né ricerca web: le analisi con notizie restano agli orari "scansione" delle Impostazioni.
+
+## Più chat Telegram
+
+`TELEGRAM_CHAT_ID` accetta più ID separati da virgola (es. `123456789,987654321`): ogni avviso viene inviato a tutte le chat e tutte possono usare i pulsanti e i comandi (/stato, /idee, /stop, /riprendi). Per un gruppo usa l'ID del gruppo (negativo) dopo aver aggiunto il bot.

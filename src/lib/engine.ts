@@ -6,7 +6,7 @@ import { blendConfidence, quantConfidence } from "./confidence";
 import { analyze, favorableBuy, favorableSell, techPanel, type Analysis, type Tech } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
-import type { Button, TelegramLike } from "./telegram";
+import { parseChatIds, type Button, type TelegramLike } from "./telegram";
 import { dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
 import type { Candle, Position, Rate, Settings, SourceRef, Suggestion } from "./types";
 
@@ -673,14 +673,15 @@ export async function tick(d: Deps): Promise<TickResult> {
 }
 
 // ------------------------------------------------------------------ Telegram
-export async function handleTelegram(d: Deps, update: unknown, allowedChatId: string): Promise<void> {
+export async function handleTelegram(d: Deps, update: unknown, allowedChatIds: string): Promise<void> {
+  const allowed = new Set(parseChatIds(allowedChatIds));
   const u = update as {
     callback_query?: { id: string; data?: string; message?: { message_id: number; chat: { id: number }; text?: string } };
     message?: { text?: string; chat: { id: number } };
   };
   const cb = u.callback_query;
   if (cb) {
-    if (String(cb.message?.chat.id) !== allowedChatId) return;
+    if (!allowed.has(String(cb.message?.chat.id))) return;
     const m = /^([ar]):(\d+)$/.exec(cb.data ?? "");
     if (!m) { await d.tg.answer(cb.id, "Comando non valido"); return; }
     const id = Number(m[2]);
@@ -692,7 +693,7 @@ export async function handleTelegram(d: Deps, update: unknown, allowedChatId: st
     return;
   }
   const msg = u.message;
-  if (!msg?.text || String(msg.chat.id) !== allowedChatId) return;
+  if (!msg?.text || !allowed.has(String(msg.chat.id))) return;
   const cmd = msg.text.trim().split(/\s+/)[0].toLowerCase().replace(/@.*$/, "");
   if (cmd === "/stato") {
     const s = await snapshot(d);
