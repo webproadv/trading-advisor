@@ -69,3 +69,7 @@ Ad ogni aggiornamento (ogni 15 minuti in orario di mercato) l'app calcola il pan
 - viene passato a Claude, che valuta tutti gli orizzonti e può proporre idee `intraday` (target 1,5–4%, stop 0,7–2%, calibrati sull'ATR a 1 ora);
 - genera, senza costi IA, idee intraday da regole quando 30m e 1h sono entrambi concordi e l'allineamento pesato è ≥ 70% (acquisto, con trend giornaliero non ribassista) o ≤ −70% (vendita di titoli in portafoglio): al massimo una per titolo e direzione al giorno;
 - le idee intraday scadono dopo 6 ore, accettano un margine minimo di 1,5% (invece di quello impostato per lo swing) e **non vengono mai eseguite dall'autopilot**: solo approvazione manuale.
+
+## Acquisto manuale dalla pagina Analisi
+
+Ogni titolo della watchlist ha un campo "azioni" e il pulsante **Compra** (desktop: seconda colonna; mobile: dentro la scheda). L'acquisto è a mercato, sul conto demo, solo a mercato aperto del titolo, entro la giacenza e con un minimo di $10; chiede conferma e viene registrato come operazione manuale. Non è soggetto ai limiti giornalieri dell'autopilot.

@@ -286,7 +286,7 @@ export async function executeSuggestion(d: Deps, id: number, opts: ExecOpts): Pr
     if (s.side === "buy") {
       if (Math.abs(rate.ask / s.price_ref - 1) > 0.05) throw new Error(`il prezzo si e' mosso oltre il 5% (${num(s.price_ref, 2)} → ${num(rate.ask, 2)}): rigenera l'idea`);
       const amount = round2(opts.amountUsd ?? (units ? units * rate.ask * k : s.amount_usd));
-      if (amount < MIN_ORDER_USD) throw new Error(`importo sotto il minimo di ${MIN_ORDER_USD} USD`);
+      if (amount < MIN_ORDER_USD) throw new Error(`importo sotto il minimo di $${MIN_ORDER_USD}`);
       const pf = await d.etoro.portfolio();
       if (pf.cash !== null && amount > pf.cash) throw new Error(`giacenza insufficiente (${usd(pf.cash)})`);
       const open = await d.etoro.openBuy(s.instrument_id, amount);
@@ -345,6 +345,33 @@ export async function rejectSuggestion(d: Deps, id: number): Promise<ExecResult>
 
 /** Chiusura manuale/automatica diretta di un titolo (senza passare da un'idea). */
 export class MarketClosedError extends Error {}
+
+/** Acquisto manuale (es. dalla pagina Analisi): a mercato aperto, senza i limiti dell'autopilot ma entro la giacenza. */
+export async function buyManual(d: Deps, symbol: string, units: number): Promise<string> {
+  const w = (await d.store.listWatchlist()).find((x) => x.symbol === symbol);
+  if (!w) throw new Error("titolo non presente in watchlist");
+  if (!(units > 0) || !Number.isFinite(units)) throw new Error("numero di azioni non valido");
+  const now = d.now();
+  if (!isRegularFor(symbol, now)) throw new MarketClosedError(`Mercato ${marketOf(symbol).group === "US" ? "USA" : "europeo"} chiuso: l'acquisto e' possibile solo a mercato aperto.`);
+  const rate = (await d.etoro.rates([w.instrument_id]))[w.instrument_id];
+  if (!rate) throw new Error("prezzo non disponibile");
+  const k = await fxOf(d, symbol);
+  const amount = round2(units * rate.ask * k);
+  if (amount < MIN_ORDER_USD) throw new Error(`importo sotto il minimo di $${MIN_ORDER_USD}`);
+  const pf = await d.etoro.portfolio();
+  if (pf.cash !== null && amount > pf.cash) throw new Error(`giacenza insufficiente (${usd(pf.cash)})`);
+  const open = await d.etoro.openBuy(w.instrument_id, amount);
+  await d.store.addTrade({
+    day: romeDay(now), symbol, instrument_id: w.instrument_id, side: "buy", amount_usd: amount,
+    units: round4(amount / ((open.price ?? rate.ask) * k)), price: open.price ?? rate.ask, position_id: open.positionId ?? null,
+    origin: "manual", suggestion_id: null, note: open.positionId ? "acquisto manuale da Analisi" : "acquisto manuale da Analisi; positionId non restituito",
+  });
+  await rememberSymbol(d, w.instrument_id, symbol);
+  const msg = `Acquisto eseguito (demo): ${symbol} per ${usd(amount)} a circa ${fmtPrice(symbol, open.price ?? rate.ask)}.`;
+  await d.store.logEvent("executed", { by: "manual", symbol, msg });
+  await notify(d, `✅ ${esc(msg)}`);
+  return msg;
+}
 
 export async function closeSymbol(d: Deps, instrumentId: number, units: number | null, by: "manual" | "autopilot", note: string): Promise<string> {
   const now = d.now();

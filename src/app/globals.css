@@ -214,3 +214,7 @@ table.pos-t td.pl small { font-weight: 600; opacity: .85; }
   .hero .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
   .hero .stat { padding: 7px 8px; border-radius: 12px; } .hero .stat .k { font-size: 9.5px; letter-spacing: .03em; } .hero .stat .v { font-size: 13px; }
 }
+
+.buybox .row { flex-wrap: nowrap; } .buybox input { width: 96px; min-height: 36px; padding: 6px 10px; } .buybox button { min-height: 36px; padding: 6px 14px; }
+.buybox .est { font-size: 12.5px; white-space: nowrap; }
+.acard .buybox { margin-top: 10px; } .acard .buybox input { flex: 1 1 90px; width: auto; min-width: 0; }

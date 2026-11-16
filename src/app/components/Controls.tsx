@@ -60,6 +60,34 @@ export function CloseButton({ instrumentId, units, symbol }: { instrumentId: num
   );
 }
 
+const money = (n: number, cur: string) => (cur === "USD" ? `$${n.toFixed(2)}` : new Intl.NumberFormat("it-IT", { style: "currency", currency: cur }).format(n));
+
+/** Acquisto manuale di un titolo dalla pagina Analisi. */
+export function BuyBox({ symbol, price, currency, defaultUnits }: { symbol: string; price: number; currency: string; defaultUnits: number }) {
+  const router = useRouter();
+  const [u, setU] = useState(String(defaultUnits));
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const n = Number(u.replace(",", "."));
+  const go = async () => {
+    if (!(n > 0)) { setMsg({ ok: false, text: "Inserisci un numero di azioni valido." }); return; }
+    if (!confirm(`Comprare ${n} azioni di ${symbol} (≈ ${money(n * price, currency)})?\nConto DEMO.`)) return;
+    setBusy(true);
+    const r = await call("/api/positions/buy", "POST", { symbol, units: n });
+    setMsg({ ok: !!r.ok, text: say(r) }); setBusy(false); router.refresh();
+  };
+  return (
+    <div className="buybox">
+      <div className="row">
+        <input type="number" min="0" step="0.0001" value={u} onChange={(e) => setU(e.target.value)} disabled={busy} aria-label={`Azioni da comprare di ${symbol}`} />
+        <button className="buy" disabled={busy} onClick={go}>Compra</button>
+        <span className="muted est">≈ {money(n > 0 ? n * price : 0, currency)}</span>
+      </div>
+      {msg && <div className={msg.ok ? "ok" : "error"} style={{ margin: "6px 0 0" }}>{msg.text}</div>}
+    </div>
+  );
+}
+
 export function KillSwitch({ active }: { active: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);

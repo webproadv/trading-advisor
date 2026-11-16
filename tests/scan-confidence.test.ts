@@ -113,3 +113,29 @@ describe("vendita manuale e orari di mercato", () => {
     await expect(closeSymbol(euClosed.d, 2, null, "manual", "t")).rejects.toThrow(/europeo chiuso/);
   });
 });
+
+describe("acquisto manuale dalla pagina Analisi", () => {
+  it("compra a mercato aperto entro la giacenza e registra l'operazione", async () => {
+    const { buyManual, MarketClosedError } = await import("@/lib/engine");
+    const mk = (iso: string, cash: number) => {
+      const store = new MemoryStore();
+      store.watch.set("AAPL", { symbol: "AAPL", instrument_id: 5, active: true });
+      const bought: number[] = [];
+      const e = { ...etoro, rates: async () => ({ 5: { bid: 99.9, ask: 100 } }), portfolio: async (): Promise<Portfolio> => ({ cash, positions: [] }),
+        openBuy: async (_id: number, amount: number) => { bought.push(amount); return { positionId: "x1", price: 100 }; } };
+      const d: Deps = { store, etoro: e as never, tg, claude: { enabled: false, analyze: async () => ({ summary: "", ideas: [], sources: [] }) }, now: () => new Date(iso) } as Deps;
+      return { d, store, bought };
+    };
+    const open = mk("2026-07-14T15:00:00Z", 1000); // 11:00 ET, USA aperti
+    expect(await buyManual(open.d, "AAPL", 2.5)).toMatch(/Acquisto eseguito.*\$250,00/);
+    expect(open.bought).toEqual([250]);
+    expect((await open.store.recentTrades(5))[0]).toMatchObject({ side: "buy", origin: "manual", symbol: "AAPL" });
+    const poor = mk("2026-07-14T15:00:00Z", 100);
+    await expect(buyManual(poor.d, "AAPL", 2)).rejects.toThrow(/giacenza insufficiente/);
+    await expect(buyManual(poor.d, "AAPL", 0.01)).rejects.toThrow(/sotto il minimo/);
+    await expect(buyManual(poor.d, "NOPE", 1)).rejects.toThrow(/watchlist/);
+    const closed = mk("2026-07-14T07:30:00Z", 1000);
+    await expect(buyManual(closed.d, "AAPL", 1)).rejects.toBeInstanceOf(MarketClosedError);
+    expect(closed.bought.length).toBe(0);
+  });
+});
