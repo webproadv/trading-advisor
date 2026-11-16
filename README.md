@@ -73,3 +73,7 @@ Ad ogni aggiornamento (ogni 15 minuti in orario di mercato) l'app calcola il pan
 ## Acquisto manuale dalla pagina Analisi
 
 Ogni titolo della watchlist ha un campo "azioni" e il pulsante **Compra** (desktop: seconda colonna; mobile: dentro la scheda). L'acquisto è a mercato, sul conto demo, solo a mercato aperto del titolo, entro la giacenza e con un minimo di $10; chiede conferma e viene registrato come operazione manuale. Non è soggetto ai limiti giornalieri dell'autopilot.
+
+## Ricerca opportunità automatica ogni 15 minuti
+
+Impostazione "Cerca opportunità ogni (minuti)" (default 15, 0 = solo orari fissi): ogni N minuti il tick lancia la stessa ricerca del pulsante "Cerca opportunità" (Claude + ricerca web + indicatori su 4 timeframe) per **USA** (da premarket 08:00 ET alla chiusura) ed **Europa** (da pre-apertura 08:00 alla chiusura), nei giorni di borsa. Il tick gira ogni 5 minuti e fa al massimo una scansione per volta: se USA ed Europa sono dovute insieme, la seconda parte 5 minuti dopo. Ogni scansione usa l'IA (circa 70 al giorno con 15 minuti): aumenta l'intervallo per spendere meno.

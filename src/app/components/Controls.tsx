@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { money } from "@/lib/format";
 import type { Settings } from "@/lib/types";
 
 async function call(url: string, method: string, body?: unknown) {
@@ -60,7 +61,6 @@ export function CloseButton({ instrumentId, units, symbol }: { instrumentId: num
   );
 }
 
-const money = (n: number, cur: string) => (cur === "USD" ? `$${n.toFixed(2)}` : new Intl.NumberFormat("it-IT", { style: "currency", currency: cur }).format(n));
 
 /** Acquisto manuale di un titolo dalla pagina Analisi. */
 export function BuyBox({ symbol, price, currency, defaultUnits }: { symbol: string; price: number; currency: string; defaultUnits: number }) {
@@ -184,9 +184,10 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       {num("take_profit_pct", "Soglia di guadagno per vendere (%)", "Vendo (o ti avviso) quando la posizione guadagna questa percentuale.")}
       {num("stop_loss_pct", "Soglia di perdita per vendere (%)", "Vendo (o ti avviso) quando la posizione perde questa percentuale. Obbligatoria.")}
       {num("buy_margin_pct", "Margine per comprare (%)", "Compro solo se il guadagno stimato verso il prezzo obiettivo supera questa percentuale.")}
+      {num("scan_interval_min", "Cerca opportunità ogni (minuti)", "Scansione automatica con analisi di Claude per USA ed Europa, durante premarket e orari di borsa (USA dalle 08:00 ET, Europa dalle 08:00 ora italiana). 0 = solo agli orari fissi qui sotto. Ogni scansione usa l'IA: 15 minuti = circa 70 analisi al giorno.", "1")}
       {num("min_confidence", "Fiducia minima per l'autopilot (0-100)", "Le idee con fiducia inferiore restano in attesa della tua approvazione.", "1")}
-      <label>Orari scansione USA (ora di New York)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa USA. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>
-      <label>Orari scansione Europa (ora italiana)<input type="text" value={String(s.scan_times_eu)} onChange={(e) => set("scan_times_eu", e.target.value)} /><small>Giorni di borsa europei (apertura 09:00–17:30). 08:30 = pre-apertura. Esempio: 08:30, 11:00, 15:00</small></label>
+      <label>Orari scansione USA (ora di New York, usati se l'intervallo sopra è 0)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa USA. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>
+      <label>Orari scansione Europa (ora italiana, usati se l'intervallo sopra è 0)<input type="text" value={String(s.scan_times_eu)} onChange={(e) => set("scan_times_eu", e.target.value)} /><small>Giorni di borsa europei (apertura 09:00–17:30). 08:30 = pre-apertura. Esempio: 08:30, 11:00, 15:00</small></label>
       <label className="row"><input type="checkbox" checked={!!s.alerts_enabled} onChange={(e) => set("alerts_enabled", e.target.checked)} /> Alert su Telegram attivi</label>
       <label className="row"><input type="checkbox" checked={!!s.allow_discovery} onChange={(e) => set("allow_discovery", e.target.checked)} /> Cerca anche titoli fuori dalla watchlist</label>
       <label className="row"><input type="checkbox" checked={!!s.auto_follow_sell_ideas} onChange={(e) => set("auto_follow_sell_ideas", e.target.checked)} /> L&apos;autopilot vende anche sulle idee di vendita (oltre che sulle soglie)</label>

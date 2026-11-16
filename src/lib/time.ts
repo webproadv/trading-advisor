@@ -144,6 +144,18 @@ export function dueScanSlotsEu(times: string[], date: Date, windowMin = 120): st
   return out;
 }
 
+/** Slot di scansione automatica ogni `interval` minuti: USA da premarket 08:00 ET alla chiusura, Europa da pre-apertura 08:00 alla chiusura. */
+export function autoScanSlots(interval: number, date: Date): string[] {
+  if (!(interval >= 1)) return [];
+  const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const out: string[] = [];
+  const us = sessionOf(date);
+  if ((us.session === "premarket" || us.session === "regular") && us.minutes >= 8 * 60) out.push(`${us.day}@${hhmm(Math.floor(us.minutes / interval) * interval)}`);
+  const eu = euSessionOf(date);
+  if ((eu.session === "premarket" || eu.session === "regular") && eu.minutes >= 8 * 60) out.push(`${eu.day}@${hhmm(Math.floor(eu.minutes / interval) * interval)}@EU`);
+  return out;
+}
+
 export const scopeOfSlot = (slot: string): Group => (slot.endsWith("@EU") ? "EU" : "US");
 
 export function euLabel(date: Date): string {

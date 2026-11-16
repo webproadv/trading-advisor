@@ -40,7 +40,7 @@ export default async function Suggerimenti() {
         <thead><tr><th>Data</th><th>Titolo</th><th>Azione</th><th>Azioni</th><th>Stato</th></tr></thead>
         <tbody>
           {past.length === 0 && <tr><td colSpan={5} className="empty">Ancora nulla.</td></tr>}
-          {past.map((s) => <tr key={s.id}><td data-label="Data">{new Date(s.created_at).toLocaleString("it-IT")}</td><td className="title" data-label="Titolo">{s.symbol}</td><td data-label="Azione">{s.side === "buy" ? "compra" : "vendi"}</td><td data-label="Azioni">{num(s.units)}</td><td data-label="Stato">{ST[s.status]}</td></tr>)}
+          {past.map((s) => <tr key={s.id}><td className="wide" data-label="Data">{new Date(s.created_at).toLocaleString("it-IT")}</td><td className="title" data-label="Titolo">{s.symbol}</td><td data-label="Azione">{s.side === "buy" ? "compra" : "vendi"}</td><td data-label="Azioni">{num(s.units)}</td><td data-label="Stato">{ST[s.status]}</td></tr>)}
         </tbody>
       </table></div>
     </>

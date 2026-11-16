@@ -7,7 +7,7 @@ import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, techPanel, ty
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import { parseChatIds, type Button, type TelegramLike } from "./telegram";
-import { dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
+import { autoScanSlots, dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
 import type { Candle, Position, Rate, Settings, SourceRef, Suggestion } from "./types";
 
 export interface Deps {
@@ -766,7 +766,10 @@ export async function tick(d: Deps): Promise<TickResult> {
       await guard("autopilot", () => autopilotSweep(d));
     }
 
-    const slots = [...dueScanSlots(settings.scan_times, now), ...dueScanSlotsEu(settings.scan_times_eu, now)];
+    // scansione con Claude: ogni N minuti (default 15) oppure agli orari fissi. Una sola scansione per tick (la prossima al giro successivo).
+    const slots = settings.scan_interval_min > 0
+      ? autoScanSlots(settings.scan_interval_min, now)
+      : [...dueScanSlots(settings.scan_times, now), ...dueScanSlotsEu(settings.scan_times_eu, now)];
     for (const slot of slots) {
       if (!(await once(d, `scan:${slot}`))) continue;
       try { const r = await runScan(d, slot); did.push(`scan ${slot}: ${r.created.length} idee`); }
@@ -774,6 +777,7 @@ export async function tick(d: Deps): Promise<TickResult> {
         await d.store.logEvent("scan_error", { slot, error: (e as Error).message });
         await notify(d, `⚠️ Scansione ${esc(slot)} non riuscita: ${esc((e as Error).message.slice(0, 200))}`);
       }
+      break;
     }
 
     if (sess.tradingDay && sess.minutes >= 16 * 60 + 15 && sess.minutes < 20 * 60 && (await once(d, `summary:${sess.day}`))) {

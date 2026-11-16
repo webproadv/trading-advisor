@@ -149,3 +149,30 @@ describe("operazioni su titoli europei", () => {
     expect(eto.opened).toHaveLength(0);
   });
 });
+
+describe("simbolo di valuta sempre davanti", () => {
+  it("money, usd e fmtPrice", async () => {
+    const { money, usd } = await import("@/lib/format");
+    expect(money(14.2, "EUR")).toBe("€14,20");
+    expect(money(-3, "EUR")).toBe("-€3,00");
+    expect(money(9.1, "CHF")).toBe("CHF 9,10");
+    expect(usd(1234.5)).toBe("$1.234,50");
+    expect(fmtPrice("ENI.MI", 14.5)).toBe("€14,50");
+    expect(fmtPrice("NESN.SW", 90)).toBe("CHF 90,00");
+  });
+});
+
+describe("scansione automatica ogni 15 minuti", () => {
+  it("slot per USA ed Europa in orario di mercato", async () => {
+    const { autoScanSlots } = await import("@/lib/time");
+    // 15:07 Roma = 09:07 ET (premarket USA) = Europa aperta
+    expect(autoScanSlots(15, new Date("2026-07-14T13:07:00Z"))).toEqual(["2026-07-14@09:00", "2026-07-14@15:00@EU"]);
+    // 06:10 Roma: Europa non ancora in pre-apertura, USA ancora prima delle 08:00 ET
+    expect(autoScanSlots(15, new Date("2026-07-14T04:10:00Z"))).toEqual([]);
+    // 08:20 Roma: pre-apertura Europa
+    expect(autoScanSlots(15, new Date("2026-07-14T06:20:00Z"))).toEqual(["2026-07-14@08:15@EU"]);
+    // sabato: niente
+    expect(autoScanSlots(15, new Date("2026-07-18T13:07:00Z"))).toEqual([]);
+    expect(autoScanSlots(0, new Date("2026-07-14T13:07:00Z"))).toEqual([]);
+  });
+});

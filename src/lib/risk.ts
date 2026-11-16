@@ -50,6 +50,7 @@ export function validateSettings(s: Settings): string[] {
   if (!(s.stop_loss_pct > 0 && s.stop_loss_pct < 100)) e.push("la soglia di perdita deve essere tra 0 e 100 (e' obbligatoria)");
   if (s.max_position_usd > s.max_daily_invest_usd && s.max_daily_invest_usd > 0) e.push("l'importo per operazione supera il massimo giornaliero");
   if (!(s.min_confidence >= 0 && s.min_confidence <= 100)) e.push("fiducia minima tra 0 e 100");
+  if (!(Number.isInteger(s.scan_interval_min) && (s.scan_interval_min === 0 || (s.scan_interval_min >= 5 && s.scan_interval_min <= 240)))) e.push("intervallo di scansione: 0 oppure tra 5 e 240 minuti");
   const okTimes = (a: unknown) => Array.isArray(a) && a.every((t) => typeof t === "string" && /^([01]?\d|2[0-3]):[0-5]\d$/.test(t));
   if (!okTimes(s.scan_times) || !okTimes(s.scan_times_eu)) e.push("orari scansione non validi (HH:MM)");
   return e;
