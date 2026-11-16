@@ -18,7 +18,7 @@ export function SuggestionCard({ id, side, units, price, symbol }: { id: number;
     const n = Number(u.replace(",", "."));
     if (action === "approve") {
       if (!(n > 0)) { setMsg("Inserisci un numero di azioni valido."); return; }
-      const label = side === "buy" ? `Comprare ${n} azioni di ${symbol} (≈ ${(n * price).toFixed(2)} USD)?` : `Vendere ${n} azioni di ${symbol}?`;
+      const label = side === "buy" ? `Comprare ${n} azioni di ${symbol} (≈ $${(n * price).toFixed(2)})?` : `Vendere ${n} azioni di ${symbol}?`;
       if (!confirm(`${label}\nConto DEMO.`)) return;
     }
     setBusy(true);
@@ -29,7 +29,7 @@ export function SuggestionCard({ id, side, units, price, symbol }: { id: number;
     <div>
       <div className="row">
         <label>Numero di azioni <input type="number" min="0" step="0.0001" value={u} onChange={(e) => setU(e.target.value)} disabled={busy} /></label>
-        <span className="muted">≈ {(Number(u.replace(",", ".")) * price || 0).toFixed(2)} USD</span>
+        <span className="muted">≈ ${(Number(u.replace(",", ".")) * price || 0).toFixed(2)}</span>
         <button className={side === "buy" ? "buy" : "sell"} disabled={busy} onClick={() => act("approve")}>{side === "buy" ? "Compra" : "Vendi"}</button>
         <button disabled={busy} onClick={() => act("reject")}>Rifiuta</button>
       </div>
@@ -150,8 +150,8 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         </select>
         <small>In autopilot compro/vendo da solo solo se tutti i limiti sotto sono rispettati.</small>
       </label>
-      {num("max_daily_invest_usd", "Massimo investibile al giorno (USD)", "Tetto sugli acquisti dell'autopilot in una giornata di borsa.")}
-      {num("max_position_usd", "Massimo per singola operazione (USD)", "Importo massimo di ogni acquisto proposto o automatico.")}
+      {num("max_daily_invest_usd", "Massimo investibile al giorno ($)", "Tetto sugli acquisti dell'autopilot in una giornata di borsa.")}
+      {num("max_position_usd", "Massimo per singola operazione ($)", "Importo massimo di ogni acquisto proposto o automatico.")}
       {num("max_open_positions", "Posizioni aperte massime", "Oltre questo numero l'autopilot non compra.", "1")}
       {num("take_profit_pct", "Soglia di guadagno per vendere (%)", "Vendo (o ti avviso) quando la posizione guadagna questa percentuale.")}
       {num("stop_loss_pct", "Soglia di perdita per vendere (%)", "Vendo (o ti avviso) quando la posizione perde questa percentuale. Obbligatoria.")}

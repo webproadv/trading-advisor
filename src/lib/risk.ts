@@ -18,7 +18,7 @@ export function sizeBuy(i: SizeInput): SizeResult {
   if (cashCap < MIN_ORDER_USD) reasons.push("giacenza insufficiente");
   if (i.openCount >= i.settings.max_open_positions) reasons.push("numero massimo di posizioni aperte raggiunto");
   amount = Math.floor(amount * 100) / 100;
-  if (amount < MIN_ORDER_USD && reasons.length === 0) reasons.push(`importo sotto il minimo di ${MIN_ORDER_USD} USD`);
+  if (amount < MIN_ORDER_USD && reasons.length === 0) reasons.push(`importo sotto il minimo di $${MIN_ORDER_USD}`);
   if (!Number.isFinite(i.price) || i.price <= 0) reasons.push("prezzo non valido");
   const units = i.price > 0 ? round4(amount / i.price) : 0;
   return { amount: round2(amount), units, reasons };

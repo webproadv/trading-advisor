@@ -56,7 +56,8 @@ describe("mercati europei", () => {
   it("giorno di Roma e formato prezzo", () => {
     expect(romeDay(utc("2026-07-14T22:30:00Z"))).toBe("2026-07-15");
     expect(fmtPrice("ENI.MI", 14.5)).toMatch(/€/);
-    expect(fmtPrice("AAPL", 14.5)).toMatch(/USD/);
+    expect(fmtPrice("AAPL", 14.5)).toBe("$14,50");
+    expect(fmtPrice("AAPL", -8.64)).toBe("-$8,64");
   });
   it("impostazioni: orari europei validati", () => {
     expect(validateSettings({ ...DEFAULT_SETTINGS, scan_times_eu: ["25:00"] }).length).toBeGreaterThan(0);

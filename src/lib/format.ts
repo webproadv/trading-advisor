@@ -2,9 +2,11 @@ import { marketOf } from "./time";
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 export const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
+/** Dollari con il simbolo davanti: $1.234,56 / -$8,64 (non "1.234,56 USD"). */
 export function usd(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "n/d";
-  return new Intl.NumberFormat("it-IT", { style: "currency", currency: "USD" }).format(n);
+  const body = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+  return `${n < 0 && Math.abs(n) >= 0.005 ? "-" : ""}$${body}`;
 }
 
 export function pct(n: number | null | undefined, digits = 1): string {
@@ -42,5 +44,7 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Pr
 /** Prezzo di un titolo nella sua valuta di quotazione (USD, EUR, CHF). */
 export function fmtPrice(symbol: string, n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "n/d";
-  return new Intl.NumberFormat("it-IT", { style: "currency", currency: marketOf(symbol).currency }).format(n);
+  const cur = marketOf(symbol).currency;
+  if (cur === "USD") return usd(n);
+  return new Intl.NumberFormat("it-IT", { style: "currency", currency: cur }).format(n);
 }
