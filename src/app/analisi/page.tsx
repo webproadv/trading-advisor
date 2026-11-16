@@ -18,7 +18,7 @@ export default async function Analisi() {
     <>
       <h1>Analisi tecnica</h1>
       <p className="muted">Indicatori su candele giornaliere con il prezzo live; le colonne 30m, 1h e 4h sono il giudizio sugli stessi indicatori calcolati su quei timeframe. Si aggiorna ogni 15 minuti in orario di mercato. Il giudizio conta i segnali di 9 indicatori (RSI, Stocastico, StochRSI, MACD, ADX, Williams %R, CCI, Momentum, Pivot).</p>
-      <div className="scroll"><table className="rt dense">
+      <div className="scroll only-desk"><table>
         <thead><tr><th>Titolo</th><th>Giudizio</th><th>30m</th><th>1h</th><th>4h</th><th>Prezzo</th><th>RSI</th><th>Stoch K/D</th><th>StochRSI</th><th>MACD ist.</th><th>ADX (+DI/-DI)</th><th>Williams</th><th>CCI</th><th>Mom. 10g</th><th>ATR%</th><th>Pivot S1 / P / R1</th><th>Aggiornato</th></tr></thead>
         <tbody>
           {rows.length === 0 && <tr><td colSpan={17} className="empty">Watchlist vuota.</td></tr>}
@@ -43,6 +43,36 @@ export default async function Analisi() {
           ) : <tr key={w.symbol}><td className="title" data-label="Titolo"><b>{w.symbol}</b></td><td colSpan={16} className="empty">Nessun dato ancora: avvia una scansione.</td></tr>)}
         </tbody>
       </table></div>
+      <div className="only-mob">
+        {rows.length === 0 && <div className="card muted">Watchlist vuota.</div>}
+        {rows.map(({ w, t, m }) => {
+          const v = mtfSummary(m).verdicts;
+          return (
+            <div className="card acard" key={w.symbol}>
+              <div className="h"><b>{w.symbol}</b>{t ? <span className={`chip ${color(t.signals.verdict)}`}>{VERDICT[t.signals.verdict]} · {t.signals.buy}▲ {t.signals.sell}▼</span> : <span className="muted">nessun dato</span>}</div>
+              {t && (
+                <>
+                  <div className="tf">{(["30m", "1h", "4h"] as const).map((f) => <span key={f} className={`chip ${v[f] ? color(v[f]!) : "muted"}`}>{f} {v[f] ? VERDICT[v[f]!] : "n/d"}</span>)}</div>
+                  <div className="px">{fmtPrice(w.symbol, t.price)} · RSI {n(t.rsi14)} · ATR {n(t.atrPct)}% · {new Date(t.asOf).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</div>
+                  <details>
+                    <summary>Tutti gli indicatori</summary>
+                    <div className="ind">
+                      <div className={color(t.signals.detail.Stoch)}><span>Stoch K/D</span>{n(t.stochK, 0)} / {n(t.stochD, 0)}</div>
+                      <div className={color(t.signals.detail.StochRSI)}><span>StochRSI</span>{n(t.stochRsiK, 0)}</div>
+                      <div className={color(t.signals.detail.MACD)}><span>MACD ist.</span>{n(t.macdHist, 3)}</div>
+                      <div className={color(t.signals.detail.ADX)}><span>ADX +DI/-DI</span>{n(t.adx, 0)} ({n(t.plusDI, 0)}/{n(t.minusDI, 0)})</div>
+                      <div className={color(t.signals.detail["Williams%R"])}><span>Williams</span>{n(t.willR, 0)}</div>
+                      <div className={color(t.signals.detail.CCI)}><span>CCI</span>{n(t.cci20, 0)}</div>
+                      <div className={color(t.signals.detail.Momentum)}><span>Mom. 10g</span>{n(t.mom10Pct)}%</div>
+                      <div className={color(t.signals.detail.Pivot)}><span>Pivot S1/P/R1</span>{t.pivots ? `${n(t.pivots.s1, 2)}/${n(t.pivots.p, 2)}/${n(t.pivots.r1, 2)}` : "n/d"}</div>
+                    </div>
+                  </details>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
       <p className="muted">Strumento educativo su conto demo, non consulenza finanziaria.</p>
     </>
   );
