@@ -39,14 +39,29 @@ export class Telegram implements TelegramLike {
     return j;
   }
 
+  /** Chiamata per ogni invio fallito verso una singola chat (es. per il registro eventi). */
+  onFail?: (info: { bot: number; chat: string; error: string }) => void;
+
+  /** Invia a tutte le chat e restituisce l'esito di ciascuna. */
+  async sendDetailed(html: string, buttons?: Button[][]): Promise<Array<{ bot: number; chat: string; ok: boolean; error?: string }>> {
+    const reply_markup = buttons ? { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } : undefined;
+    const jobs = this.bots.flatMap((b, i) => (b.token ? b.chatIds : []).map(async (chat) => {
+      try {
+        await this.call("sendMessage", { chat_id: chat, text: html.slice(0, 3900), parse_mode: "HTML", disable_web_page_preview: true, reply_markup }, b.token);
+        return { bot: i + 1, chat, ok: true };
+      } catch (e) {
+        const error = (e as Error).message.replace(/bot\d+:[\w-]+/g, "bot***");
+        this.onFail?.({ bot: i + 1, chat, error });
+        return { bot: i + 1, chat, ok: false, error };
+      }
+    }));
+    return Promise.all(jobs);
+  }
+
   async send(html: string, buttons?: Button[][]) {
     if (!this.enabled) return;
-    const reply_markup = buttons ? { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } : undefined;
-    const jobs = this.bots.filter((b) => b.token).flatMap((b) => b.chatIds.map((chat) =>
-      this.call("sendMessage", { chat_id: chat, text: html.slice(0, 3900), parse_mode: "HTML", disable_web_page_preview: true, reply_markup }, b.token)));
-    const results = await Promise.allSettled(jobs);
-    const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
-    if (failed.length === results.length) throw failed[0].reason; // errore solo se non arriva a nessuna chat
+    const res = await this.sendDetailed(html, buttons);
+    if (res.length && res.every((r) => !r.ok)) throw new Error(res[0].error); // errore solo se non arriva a nessuna chat
   }
 
   async answer(callbackId: string, text: string) {

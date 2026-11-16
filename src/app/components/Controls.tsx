@@ -87,7 +87,7 @@ export function ScanButton() {
 
 export function TelegramSetup() {
   const [msg, setMsg] = useState("");
-  const go = async () => { const r = await call("/api/telegram/setup", "POST"); setMsg(r.ok ? "Collegato: controlla il messaggio su Telegram." : say(r)); };
+  const go = async () => { const r = await call("/api/telegram/setup", "POST"); setMsg(r.ok && !r.error ? "Collegato: controlla il messaggio su Telegram." : say(r)); };
   return <div className="row"><button onClick={go}>Collega / verifica Telegram</button>{msg && <span className="muted">{msg}</span>}</div>;
 }
 

@@ -12,7 +12,10 @@ export async function POST() {
   try {
     const tg = makeTelegram();
     await tg.setWebhooks(`${app.startsWith("http") ? app : `https://${app}`}/api/telegram/webhook`, secret);
-    await tg.send("✅ Trading Advisor collegato. Comandi: /stato · /idee · /stop · /riprendi");
-    return Response.json({ ok: true });
+    const results = await tg.sendDetailed("✅ Trading Advisor collegato. Comandi: /stato · /idee · /stop · /riprendi");
+    const failed = results.filter((r) => !r.ok);
+    const hint = (e?: string) => /chat not found|can't initiate|blocked|Forbidden/i.test(e ?? "") ? " (apri il bot su Telegram e premi Avvia, poi controlla l'ID)" : "";
+    if (failed.length) return Response.json({ error: failed.map((f) => `bot ${f.bot}, chat ${f.chat}: ${f.error}${hint(f.error)}`).join(" | "), sent: results.length - failed.length }, { status: failed.length === results.length ? 500 : 207 });
+    return Response.json({ ok: true, sent: results.length });
   } catch (e) { return Response.json({ error: (e as Error).message }, { status: 500 }); }
 }
