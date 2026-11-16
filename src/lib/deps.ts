@@ -28,7 +28,7 @@ export function makeDeps(): Deps {
     fx: (currency: string) => usdPer(currency, store, new Date()),
     etoro: makeEtoro(),
     tg: (() => { const t = makeTelegram(); t.onFail = (i) => { void store.logEvent("telegram_send_failed", i).catch(() => undefined); }; return t; })(),
-    claude: new ClaudeAnalyst(process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5"),
+    claude: new ClaudeAnalyst(process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_MODEL || "claude-haiku-5-5"),
     now: () => new Date(),
   };
 }

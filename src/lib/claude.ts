@@ -108,7 +108,7 @@ export class ClaudeAnalyst implements ClaudeLike {
   enabled: boolean;
   constructor(
     private apiKey: string | undefined,
-    private model = "claude-sonnet-5-5",
+    private model = "claude-haiku-5-5",
     private f: typeof fetch = fetch,
     private timeoutMs = 52000,
   ) { this.enabled = !!apiKey; }
@@ -128,7 +128,7 @@ export class ClaudeAnalyst implements ClaudeLike {
         headers: { "x-api-key": this.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
           model: this.model, max_tokens: 4000, system: systemFor(ctx.scope), messages,
-          tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5, user_location: ctx.scope === "EU" ? { type: "approximate", country: "IT", timezone: "Europe/Rome" } : { type: "approximate", country: "US", timezone: "America/New_York" } }],
+          tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2, user_location: ctx.scope === "EU" ? { type: "approximate", country: "IT", timezone: "Europe/Rome" } : { type: "approximate", country: "US", timezone: "America/New_York" } }],
         }),
         signal: AbortSignal.timeout(left),
       });
