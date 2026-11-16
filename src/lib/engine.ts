@@ -1,15 +1,27 @@
 // Motore del consulente: monitoraggio, scansioni, suggerimenti, esecuzione e autopilot (solo conto DEMO).
 import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
-import { clamp, esc, mapLimit, num, pct, round2, round4, usd } from "./format";
+import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
 import { analyze, favorableBuy, favorableSell, type Analysis } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import type { Button, TelegramLike } from "./telegram";
-import { dueScanSlots, etLabel, isPremarketSlot, sessionOf } from "./time";
+import { dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
 import type { Candle, Position, Rate, Settings, SourceRef, Suggestion } from "./types";
 
-export interface Deps { store: Store; etoro: EtoroLike; tg: TelegramLike; claude: ClaudeLike; now: () => Date }
+export interface Deps {
+  store: Store; etoro: EtoroLike; tg: TelegramLike; claude: ClaudeLike; now: () => Date;
+  /** USD per 1 unita' di valuta (es. EUR). Assente = solo titoli in USD. */
+  fx?: (currency: string) => Promise<number>;
+}
+
+/** Quanti USD vale 1 unita' di prezzo del titolo (1 per i titoli USA). */
+async function fxOf(d: Deps, symbol: string): Promise<number> {
+  const cur = marketOf(symbol).currency;
+  if (cur === "USD") return 1;
+  if (!d.fx) throw new Error(`conversione ${cur}/USD non configurata`);
+  return d.fx(cur);
+}
 
 const SUGGESTION_TTL_H = 20;
 
@@ -58,7 +70,8 @@ export async function snapshot(d: Deps): Promise<Snapshot> {
   const positions: PosView[] = longs.map((p) => {
     const bid = rates[p.instrumentId]?.bid ?? null;
     const unitsEff = p.units ?? (p.openRate > 0 ? p.amount / p.openRate : null);
-    const value = bid !== null && unitsEff !== null ? unitsEff * bid : null;
+    // valore in USD = importo investito x variazione di prezzo (indipendente dalla valuta di quotazione)
+    const value = bid !== null && p.openRate > 0 ? p.amount * (bid / p.openRate) : null;
     const pnl = value !== null ? value - p.amount : null;
     return { ...p, symbol: sm[String(p.instrumentId)] ?? `ID ${p.instrumentId}`, bid, unitsEff, value, pnl, pnlPct: bid !== null && p.openRate > 0 ? (bid / p.openRate - 1) * 100 : null };
   });
@@ -74,7 +87,7 @@ export function suggestionHtml(s: Suggestion, header?: string): string {
   const lines = [
     header ? `<i>${esc(header)}</i>` : "",
     `<b>${icon} ${esc(s.symbol)}</b> — idea #${s.id}`,
-    `Prezzo ${num(s.price_ref, 2)} USD${s.target_price ? ` · target ${num(s.target_price, 2)} (${pct(up)})` : ""}${s.stop_price ? ` · stop ${num(s.stop_price, 2)}` : ""}`,
+    `Prezzo ${fmtPrice(s.symbol, s.price_ref)}${s.target_price ? ` · target ${fmtPrice(s.symbol, s.target_price)} (${pct(up)})` : ""}${s.stop_price ? ` · stop ${fmtPrice(s.symbol, s.stop_price)}` : ""}`,
     `Proposta: ${num(s.units, 4)} azioni ≈ ${usd(s.amount_usd)} · fiducia ${s.confidence}/100`,
     s.rationale ? `Motivo: ${esc(s.rationale)}` : "",
     s.sources?.length ? `Fonti: ${s.sources.slice(0, 3).map((x) => `<a href="${esc(x.url)}">${esc(x.title.slice(0, 40))}</a>`).join(" · ")}` : "",
@@ -118,18 +131,19 @@ export async function proposeIdea(
 
   if (idea.side === "buy") {
     const price = rate.ask;
+    const k = await fxOf(d, symbol);
     const target = idea.target_price ?? price * (1 + settings.take_profit_pct / 100);
     const up = upsidePct(target, price);
     if (up === null || up < settings.buy_margin_pct) return { skipped: `upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine di acquisto (${settings.buy_margin_pct}%)` };
     if (c.snap.positions.some((p) => p.instrumentId === id)) return { skipped: "gia' in portafoglio" };
     const stop = idea.stop_price && idea.stop_price < price ? idea.stop_price : price * (1 - settings.stop_loss_pct / 100);
-    const size = sizeBuy({ settings, price, cash: c.snap.cash, investedToday: c.investedAuto, openCount: c.snap.positions.length });
+    const size = sizeBuy({ settings, price: price * k, cash: c.snap.cash, investedToday: c.investedAuto, openCount: c.snap.positions.length });
     // in modalita' consulente proponiamo comunque la dimensione ideale; i limiti bloccano solo l'autopilot
     const cashOnly = c.snap.cash === null ? Infinity : Math.max(0, c.snap.cash * 0.98);
     const amount = round2(Math.min(settings.max_position_usd, cashOnly));
     if (amount < MIN_ORDER_USD) return { skipped: size.reasons[0] ?? "giacenza insufficiente" };
     const created = await d.store.createSuggestion({
-      symbol, instrument_id: id, side: "buy", units: round4(amount / price), amount_usd: amount, price_ref: price,
+      symbol, instrument_id: id, side: "buy", units: round4(amount / (price * k)), amount_usd: amount, price_ref: price,
       target_price: round2(target), stop_price: round2(stop), confidence: clamp(idea.confidence, 0, 100),
       rationale: idea.rationale, sources: refs, origin, expires_at,
     });
@@ -141,8 +155,9 @@ export async function proposeIdea(
   if (!held.length) return { skipped: "non in portafoglio" };
   const units = held.reduce((s, p) => s + (p.unitsEff ?? 0), 0);
   const price = rate.bid;
+  const ks = await fxOf(d, symbol);
   const created = await d.store.createSuggestion({
-    symbol, instrument_id: id, side: "sell", units: round4(units), amount_usd: round2(units * price), price_ref: price,
+    symbol, instrument_id: id, side: "sell", units: round4(units), amount_usd: round2(units * price * ks), price_ref: price,
     target_price: idea.target_price, stop_price: idea.stop_price, confidence: clamp(idea.confidence, 0, 100),
     rationale: idea.rationale, sources: refs, origin, expires_at,
   });
@@ -152,7 +167,7 @@ export async function proposeIdea(
 async function proposeCtx(d: Deps, snap: Snapshot, rates: Record<number, Rate>): Promise<ProposeCtx> {
   const now = d.now();
   const settings = await d.store.getSettings();
-  const day = sessionOf(now).day;
+  const day = romeDay(now);
   const idOf = new Map<string, number>();
   const sm = await symMap(d);
   for (const [id, sym] of Object.entries(sm)) idOf.set(sym, Number(id));
@@ -175,34 +190,35 @@ export async function executeSuggestion(d: Deps, id: number, opts: ExecOpts): Pr
     await d.store.updateSuggestion(id, { status: "expired" });
     return { ok: false, status: "expired", message: "Idea scaduta: i prezzi non sono piu' attuali." };
   }
-  const sess = sessionOf(now);
-  if (sess.session !== "regular") {
+  const day = romeDay(now);
+  if (!isRegularFor(s.symbol, now)) {
     if (opts.by !== "manual") return { ok: false, status: s.status, message: "Mercato chiuso." };
     await d.store.updateSuggestion(id, { status: "approved", result: { queuedUnits: opts.units ?? null } });
-    return { ok: true, status: "approved", message: "Mercato USA chiuso: approvata e messa in coda, partira' all'apertura (se il prezzo e' ancora in linea)." };
+    return { ok: true, status: "approved", message: `Mercato ${marketOf(s.symbol).group === "US" ? "USA" : "europeo"} chiuso: approvata e messa in coda, partira' all'apertura (se il prezzo e' ancora in linea).` };
   }
   try {
     const rate = (await d.etoro.rates([s.instrument_id]))[s.instrument_id];
     if (!rate) throw new Error("prezzo non disponibile");
     const queuedUnits = (s.result as { queuedUnits?: number | null } | null | undefined)?.queuedUnits ?? undefined;
     const units = opts.units ?? queuedUnits;
+    const k = await fxOf(d, s.symbol);
     let msg: string;
 
     if (s.side === "buy") {
       if (Math.abs(rate.ask / s.price_ref - 1) > 0.05) throw new Error(`il prezzo si e' mosso oltre il 5% (${num(s.price_ref, 2)} → ${num(rate.ask, 2)}): rigenera l'idea`);
-      const amount = round2(opts.amountUsd ?? (units ? units * rate.ask : s.amount_usd));
+      const amount = round2(opts.amountUsd ?? (units ? units * rate.ask * k : s.amount_usd));
       if (amount < MIN_ORDER_USD) throw new Error(`importo sotto il minimo di ${MIN_ORDER_USD} USD`);
       const pf = await d.etoro.portfolio();
       if (pf.cash !== null && amount > pf.cash) throw new Error(`giacenza insufficiente (${usd(pf.cash)})`);
       const open = await d.etoro.openBuy(s.instrument_id, amount);
       await d.store.addTrade({
-        day: sess.day, symbol: s.symbol, instrument_id: s.instrument_id, side: "buy", amount_usd: amount,
-        units: round4(amount / (open.price ?? rate.ask)), price: open.price ?? rate.ask, position_id: open.positionId ?? null,
+        day, symbol: s.symbol, instrument_id: s.instrument_id, side: "buy", amount_usd: amount,
+        units: round4(amount / ((open.price ?? rate.ask) * k)), price: open.price ?? rate.ask, position_id: open.positionId ?? null,
         origin: opts.by, suggestion_id: id, note: open.positionId ? undefined : "positionId non restituito",
       });
       await rememberSymbol(d, s.instrument_id, s.symbol);
       await d.store.updateSuggestion(id, { status: "executed", executed_at: now.toISOString(), result: { ...open, amount } });
-      msg = `Acquisto eseguito (demo): ${s.symbol} per ${usd(amount)} a circa ${num(open.price ?? rate.ask, 2)}.`;
+      msg = `Acquisto eseguito (demo): ${s.symbol} per ${usd(amount)} a circa ${fmtPrice(s.symbol, open.price ?? rate.ask)}.`;
     } else {
       const pf = await d.etoro.portfolio();
       const mine = pf.positions.filter((p) => p.isBuy && p.instrumentId === s.instrument_id)
@@ -218,15 +234,15 @@ export async function executeSuggestion(d: Deps, id: number, opts: ExecOpts): Pr
         const full = remaining >= pu * 0.995;
         await d.etoro.close(p.positionId, p.instrumentId, full ? null : round4(remaining));
         const u = full ? pu : remaining;
-        pnl += u * (rate.bid - p.openRate);
+        pnl += u * (rate.bid - p.openRate) * k;
         closedUnits += u; remaining -= u;
         await d.store.addTrade({
-          day: sess.day, symbol: s.symbol, instrument_id: s.instrument_id, side: "sell", amount_usd: round2(u * rate.bid),
-          units: round4(u), price: rate.bid, position_id: p.positionId, origin: opts.by, suggestion_id: id, pnl_usd: round2(u * (rate.bid - p.openRate)),
+          day, symbol: s.symbol, instrument_id: s.instrument_id, side: "sell", amount_usd: round2(u * rate.bid * k),
+          units: round4(u), price: rate.bid, position_id: p.positionId, origin: opts.by, suggestion_id: id, pnl_usd: round2(u * (rate.bid - p.openRate) * k),
         });
       }
       await d.store.updateSuggestion(id, { status: "executed", executed_at: now.toISOString(), result: { closedUnits, pnl: round2(pnl) } });
-      msg = `Vendita eseguita (demo): ${s.symbol}, ${num(closedUnits, 4)} azioni a circa ${num(rate.bid, 2)} (P/L ${usd(pnl)}).`;
+      msg = `Vendita eseguita (demo): ${s.symbol}, ${num(closedUnits, 4)} azioni a circa ${fmtPrice(s.symbol, rate.bid)} (P/L ${usd(pnl)}).`;
     }
     await d.store.logEvent("executed", { id, by: opts.by, msg });
     await notify(d, `${opts.by === "autopilot" ? "🤖 Autopilot: " : "✅ "}${esc(msg)}`);
@@ -251,12 +267,13 @@ export async function rejectSuggestion(d: Deps, id: number): Promise<ExecResult>
 /** Chiusura manuale/automatica diretta di un titolo (senza passare da un'idea). */
 export async function closeSymbol(d: Deps, instrumentId: number, units: number | null, by: "manual" | "autopilot", note: string): Promise<string> {
   const now = d.now();
-  const day = sessionOf(now).day;
+  const day = romeDay(now);
   const rate = (await d.etoro.rates([instrumentId]))[instrumentId];
   if (!rate) throw new Error("prezzo non disponibile");
   const pf = await d.etoro.portfolio();
   const sm = await symMap(d);
   const symbol = sm[String(instrumentId)] ?? `ID ${instrumentId}`;
+  const k = await fxOf(d, symbol);
   const mine = pf.positions.filter((p) => p.isBuy && p.instrumentId === instrumentId)
     .sort((a, b) => String(a.openDateTime).localeCompare(String(b.openDateTime)));
   if (!mine.length) throw new Error("nessuna posizione aperta su questo titolo");
@@ -269,24 +286,24 @@ export async function closeSymbol(d: Deps, instrumentId: number, units: number |
     const full = remaining >= pu * 0.995;
     await d.etoro.close(p.positionId, p.instrumentId, full ? null : round4(remaining));
     const u = full ? pu : remaining;
-    pnl += u * (rate.bid - p.openRate); closed += u; remaining -= u;
+    pnl += u * (rate.bid - p.openRate) * k; closed += u; remaining -= u;
     await d.store.addTrade({
-      day, symbol, instrument_id: instrumentId, side: "sell", amount_usd: round2(u * rate.bid), units: round4(u), price: rate.bid,
-      position_id: p.positionId, origin: by, suggestion_id: null, note, pnl_usd: round2(u * (rate.bid - p.openRate)),
+      day, symbol, instrument_id: instrumentId, side: "sell", amount_usd: round2(u * rate.bid * k), units: round4(u), price: rate.bid,
+      position_id: p.positionId, origin: by, suggestion_id: null, note, pnl_usd: round2(u * (rate.bid - p.openRate) * k),
     });
   }
-  return `${symbol}: chiuse ${num(closed, 4)} azioni a circa ${num(rate.bid, 2)} (P/L ${usd(pnl)}) — ${note}`;
+  return `${symbol}: chiuse ${num(closed, 4)} azioni a circa ${fmtPrice(symbol, rate.bid)} (P/L ${usd(pnl)}) — ${note}`;
 }
 
 // ------------------------------------------------------------------ monitoraggio soglie
 export async function monitorPositions(d: Deps, snap: Snapshot): Promise<string[]> {
   const settings = await d.store.getSettings();
-  const day = sessionOf(d.now()).day;
+  const day = romeDay(d.now());
   const auto = settings.mode === "autopilot" && !settings.kill_switch;
   const done: string[] = [];
   const pending = await d.store.listSuggestions(["pending", "approved"], 100);
   for (const p of snap.positions) {
-    if (p.bid === null) continue;
+    if (p.bid === null || !isRegularFor(p.symbol, d.now())) continue;
     const why = exitDecision(p.openRate, p.bid, settings);
     if (!why) continue;
     const label = why === "stop_loss" ? `soglia di perdita -${settings.stop_loss_pct}%` : `soglia di guadagno +${settings.take_profit_pct}%`;
@@ -305,7 +322,7 @@ export async function monitorPositions(d: Deps, snap: Snapshot): Promise<string[
       if (pending.some((x) => x.symbol === p.symbol && x.side === "sell")) continue;
       if (!(await once(d, `exitalert:${p.symbol}:${why}:${day}`))) continue;
       const created = await d.store.createSuggestion({
-        symbol: p.symbol, instrument_id: p.instrumentId, side: "sell", units: round4(p.unitsEff ?? 0), amount_usd: round2((p.unitsEff ?? 0) * p.bid),
+        symbol: p.symbol, instrument_id: p.instrumentId, side: "sell", units: round4(p.unitsEff ?? 0), amount_usd: round2(p.value ?? 0),
         price_ref: p.bid, target_price: null, stop_price: null, confidence: 90,
         rationale: `${p.symbol} ha raggiunto la ${label} (P/L ${pct(p.pnlPct)}).`, sources: [], origin: "monitor",
         expires_at: new Date(d.now().getTime() + 8 * 3600_000).toISOString(),
@@ -320,7 +337,7 @@ export async function monitorPositions(d: Deps, snap: Snapshot): Promise<string[
 // ------------------------------------------------------------------ situazioni favorevoli (regole, senza costi IA)
 export async function favorableSweep(d: Deps, snap: Snapshot): Promise<string[]> {
   const out: string[] = [];
-  const watch = (await d.store.listWatchlist()).filter((w) => w.active);
+  const watch = (await d.store.listWatchlist()).filter((w) => w.active && isRegularFor(w.symbol, d.now()));
   if (!watch.length) return out;
   const rates = await d.etoro.rates(watch.map((w) => w.instrument_id));
   const c = await proposeCtx(d, snap, rates);
@@ -360,8 +377,9 @@ export interface ScanSummary { slot: string; summary: string; created: Suggestio
 export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   const now = d.now();
   const settings = await d.store.getSettings();
-  const sess = sessionOf(now);
-  const watch = (await d.store.listWatchlist()).filter((w) => w.active);
+  const scope: Group = scopeOfSlot(slot);
+  const sess = scope === "EU" ? euSessionOf(now) : sessionOf(now);
+  const watch = (await d.store.listWatchlist()).filter((w) => w.active && marketOf(w.symbol).group === scope);
   const snap = await snapshot(d);
   const ids = [...new Set([...watch.map((w) => w.instrument_id), ...snap.positions.map((p) => p.instrumentId)])];
   const rates = ids.length ? await d.etoro.rates(ids) : {};
@@ -381,7 +399,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   });
   rows.sort((a, b) => b.score - a.score);
 
-  const held: HeldRow[] = snap.positions.map((p) => ({ symbol: p.symbol, units: p.unitsEff, openRate: p.openRate, price: p.bid, pnlPct: p.pnlPct }));
+  const held: HeldRow[] = snap.positions.filter((p) => marketOf(p.symbol).group === scope).map((p) => ({ symbol: p.symbol, units: p.unitsEff, openRate: p.openRate, price: p.bid, pnlPct: p.pnlPct }));
   let ideas: RawIdea[] = [];
   let summary = "";
   let sources: SourceRef[] = [];
@@ -390,7 +408,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   if (d.claude.enabled) {
     try {
       const res = await d.claude.analyze({
-        nowIso: now.toISOString(), session: sess.session, premarket: isPremarketSlot(slot), allowDiscovery: settings.allow_discovery,
+        nowIso: now.toISOString(), scope, session: sess.session, premarket: isPremarketSlot(slot), allowDiscovery: settings.allow_discovery,
         limits: { buyMarginPct: settings.buy_margin_pct, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct, maxPositionUsd: settings.max_position_usd },
         cash: snap.cash, held, watchlist: rows,
       });
@@ -405,7 +423,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
       ideas.push({ symbol: r.symbol, side: "buy", confidence: 50, target_price: r.price * (1 + settings.take_profit_pct / 100), stop_price: null, source_urls: [],
         rationale: `Segnale tecnico (trend rialzista, RSI ${r.rsi14?.toFixed(0)}, momentum 20g ${pct(r.mom20Pct)}). Regola automatica.` });
     }
-    for (const p of snap.positions) {
+    for (const p of snap.positions.filter((x) => marketOf(x.symbol).group === scope)) {
       const a = await d.store.kvGet<Analysis>(`analysis:${p.symbol}`);
       if (a && p.bid && favorableSell(a, p.bid)) ideas.push({ symbol: p.symbol, side: "sell", confidence: 50, target_price: null, stop_price: null, source_urls: [],
         rationale: "Segnale tecnico di debolezza. Regola automatica." });
@@ -426,7 +444,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   await d.store.logEvent("scan", { slot, created: created.map((s) => `${s.side} ${s.symbol}`), skipped, usedClaude });
 
   if (created.length) {
-    const head = `${isPremarketSlot(slot) ? "🌅 PREMARKET" : "📊 Scansione"} ${etLabel(now)}${summary ? `\n${esc(summary)}` : ""}\n${created.length} idee nuove${usedClaude ? "" : " (solo regole tecniche)"}.`;
+    const head = `${isPremarketSlot(slot) ? (scope === "EU" ? "🌅 PRE-APERTURA EUROPA" : "🌅 PREMARKET USA") : scope === "EU" ? "📊 Scansione Europa" : "📊 Scansione USA"} ${scope === "EU" ? euLabel(now) : etLabel(now)}${summary ? `\n${esc(summary)}` : ""}\n${created.length} idee nuove${usedClaude ? "" : " (solo regole tecniche)"}.`;
     await notify(d, head);
     for (const s of created.slice(0, 6)) await notify(d, suggestionHtml(s), buttonsFor(s));
   }
@@ -439,9 +457,8 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
   const out: string[] = [];
   if (settings.mode !== "autopilot" || settings.kill_switch) return out;
   const now = d.now();
-  const sess = sessionOf(now);
-  if (sess.session !== "regular") return out;
-  const pending = (await d.store.listSuggestions(["pending"], 100)).sort((a, b) => b.confidence - a.confidence);
+  const day = romeDay(now);
+  const pending = (await d.store.listSuggestions(["pending"], 100)).filter((s) => isRegularFor(s.symbol, now)).sort((a, b) => b.confidence - a.confidence);
   if (!pending.length) return out;
   const snap = await snapshot(d);
   const rates = await d.etoro.rates([...new Set(pending.map((s) => s.instrument_id))]);
@@ -450,17 +467,18 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
     if (new Date(s.expires_at).getTime() < now.getTime()) { await d.store.updateSuggestion(s.id, { status: "expired" }); continue; }
     const r = rates[s.instrument_id];
     const skip = async (why: string) => {
-      if (await once(d, `autoskip:${s.id}:${sess.day}`)) await d.store.logEvent("auto_skip", { id: s.id, symbol: s.symbol, why });
+      if (await once(d, `autoskip:${s.id}:${day}`)) await d.store.logEvent("auto_skip", { id: s.id, symbol: s.symbol, why });
     };
     if (!r) { await skip("prezzo non disponibile"); continue; }
     if (s.side === "buy") {
       const price = r.ask;
+      const k = await fxOf(d, s.symbol);
       if (s.confidence < settings.min_confidence) { await skip(`fiducia ${s.confidence} < ${settings.min_confidence}`); continue; }
       if (Math.abs(price / s.price_ref - 1) > 0.03) { await skip("prezzo cambiato oltre il 3% dal suggerimento"); continue; }
       const up = upsidePct(s.target_price, price);
       if (up === null || up < settings.buy_margin_pct) { await skip(`upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine`); continue; }
       if (snap.positions.some((p) => p.instrumentId === s.instrument_id)) { await skip("gia' in portafoglio"); continue; }
-      const size = sizeBuy({ settings, price, cash: snap.cash, investedToday: await d.store.investedToday(sess.day, "autopilot"), openCount: snap.positions.length });
+      const size = sizeBuy({ settings, price: price * k, cash: snap.cash, investedToday: await d.store.investedToday(day, "autopilot"), openCount: snap.positions.length });
       if (size.reasons.length) { await skip(size.reasons.join("; ")); continue; }
       const amount = Math.min(size.amount, s.amount_usd);
       if (amount < MIN_ORDER_USD) { await skip("importo sotto il minimo"); continue; }
@@ -478,8 +496,7 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
 
 export async function executeApprovedQueue(d: Deps): Promise<string[]> {
   const out: string[] = [];
-  if (sessionOf(d.now()).session !== "regular") return out;
-  for (const s of await d.store.listSuggestions(["approved"], 50)) {
+  for (const s of (await d.store.listSuggestions(["approved"], 50)).filter((x) => isRegularFor(x.symbol, d.now()))) {
     const r = await executeSuggestion(d, s.id, { by: "manual" });
     out.push(`${s.symbol}: ${r.message}`);
   }
@@ -495,7 +512,7 @@ async function expireSuggestions(d: Deps) {
 
 // ------------------------------------------------------------------ riepilogo giornaliero
 export async function dailySummary(d: Deps): Promise<void> {
-  const day = sessionOf(d.now()).day;
+  const day = romeDay(d.now());
   const snap = await snapshot(d);
   const trades = await d.store.tradesOfDay(day);
   const lines = [
@@ -513,6 +530,7 @@ export interface TickResult { session: string; did: string[]; skipped?: string }
 export async function tick(d: Deps): Promise<TickResult> {
   const now = d.now();
   const sess = sessionOf(now);
+  const eu = euSessionOf(now);
   const settings = await d.store.getSettings();
   const did: string[] = [];
 
@@ -523,10 +541,10 @@ export async function tick(d: Deps): Promise<TickResult> {
 
   try {
     if (sess.calendarStale && (await once(d, `calstale:${sess.day.slice(0, 4)}`)))
-      await notify(d, "⚠️ Il calendario festivita' USA dell'app e' scaduto: aggiornalo in src/lib/time.ts.");
+      await notify(d, "⚠️ Il calendario delle festivita' di borsa dell'app e' scaduto: aggiornalo in src/lib/time.ts.");
     await expireSuggestions(d);
 
-    if (sess.session === "regular") {
+    if (sess.session === "regular" || eu.session === "regular") {
       const guard = async (name: string, fn: () => Promise<unknown>) => {
         try { const r = await fn(); if (Array.isArray(r) && r.length) did.push(`${name}: ${r.join("; ")}`); }
         catch (e) { await d.store.logEvent("tick_error", { step: name, error: (e as Error).message }); }
@@ -542,7 +560,8 @@ export async function tick(d: Deps): Promise<TickResult> {
       await guard("autopilot", () => autopilotSweep(d));
     }
 
-    for (const slot of dueScanSlots(settings.scan_times, now)) {
+    const slots = [...dueScanSlots(settings.scan_times, now), ...dueScanSlotsEu(settings.scan_times_eu, now)];
+    for (const slot of slots) {
       if (!(await once(d, `scan:${slot}`))) continue;
       try { const r = await runScan(d, slot); did.push(`scan ${slot}: ${r.created.length} idee`); }
       catch (e) {

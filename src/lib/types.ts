@@ -13,7 +13,8 @@ export interface Settings {
   max_open_positions: number;
   min_confidence: number;           // fiducia minima (0-100) per l'autopilot
   auto_follow_sell_ideas: boolean;  // l'autopilot vende anche su idee di vendita (non solo soglie)
-  scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa
+  scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa USA
+  scan_times_eu: string[];          // orari "HH:MM" (ora italiana), giorni di borsa europei
   alerts_enabled: boolean;
   allow_discovery: boolean;         // Claude puo' proporre titoli fuori dalla watchlist
 }
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   min_confidence: 70,
   auto_follow_sell_ideas: false,
   scan_times: ["08:00", "10:00", "14:00"],
+  scan_times_eu: ["08:30", "11:00", "15:00"],
   alerts_enabled: true,
   allow_discovery: true,
 };

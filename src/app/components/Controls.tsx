@@ -75,14 +75,14 @@ export function ScanButton() {
   const router = useRouter();
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const go = async () => {
+  const go = async (scope: "US" | "EU") => {
     setBusy(true); setMsg("Analisi in corso (fino a 1 minuto)…");
-    const r = await call("/api/scan", "POST");
+    const r = await call("/api/scan", "POST", { scope });
     setBusy(false);
     setMsg(r.ok ? `Scansione completata: ${r.created} nuove idee${r.usedClaude ? " (con analisi Claude)" : " (solo regole tecniche)"}.` : say(r));
     router.refresh();
   };
-  return <div className="row"><button className="primary" disabled={busy} onClick={go}>🔎 Cerca nuove opportunità ora</button>{msg && <span className="muted">{msg}</span>}</div>;
+  return <div className="row"><button className="primary" disabled={busy} onClick={() => go("US")}>🔎 Cerca opportunità USA</button><button className="primary" disabled={busy} onClick={() => go("EU")}>🔎 Cerca opportunità Europa</button>{msg && <span className="muted">{msg}</span>}</div>;
 }
 
 export function TelegramSetup() {
@@ -110,7 +110,7 @@ export function WatchlistEditor({ items }: { items: Array<{ symbol: string; inst
   return (
     <div className="card">
       <div className="row">
-        <input type="text" style={{ maxWidth: 160 }} placeholder="Simbolo es. NVDA" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} />
+        <input type="text" style={{ maxWidth: 160 }} placeholder="NVDA, ENI.MI, SAN.MC, BMW.DE" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} />
         <button className="primary" disabled={busy || !sym} onClick={add}>Aggiungi</button>
         {msg && <span className="muted">{msg}</span>}
       </div>
@@ -124,7 +124,7 @@ export function WatchlistEditor({ items }: { items: Array<{ symbol: string; inst
 
 export function SettingsForm({ initial }: { initial: Settings }) {
   const router = useRouter();
-  const [s, setS] = useState({ ...initial, scan_times: initial.scan_times.join(", ") } as unknown as Record<string, string | number | boolean>);
+  const [s, setS] = useState({ ...initial, scan_times: initial.scan_times.join(", "), scan_times_eu: initial.scan_times_eu.join(", ") } as unknown as Record<string, string | number | boolean>);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: string | number | boolean) => setS((p) => ({ ...p, [k]: v }));
@@ -136,7 +136,8 @@ export function SettingsForm({ initial }: { initial: Settings }) {
     if (s.mode === "autopilot" && initial.mode !== "autopilot" &&
         !confirm("Attivare l'AUTOPILOT? L'app potrà comprare e vendere da sola sul conto DEMO entro i limiti impostati.")) return;
     setBusy(true);
-    const payload = { ...s, scan_times: String(s.scan_times).split(",").map((x) => x.trim()).filter(Boolean) };
+    const split = (v: unknown) => String(v).split(",").map((x) => x.trim()).filter(Boolean);
+    const payload = { ...s, scan_times: split(s.scan_times), scan_times_eu: split(s.scan_times_eu) };
     const r = await call("/api/settings", "POST", payload);
     setMsg({ ok: !!r.ok, text: r.ok ? "Impostazioni salvate." : say(r) }); setBusy(false); router.refresh();
   };
@@ -156,7 +157,8 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       {num("stop_loss_pct", "Soglia di perdita per vendere (%)", "Vendo (o ti avviso) quando la posizione perde questa percentuale. Obbligatoria.")}
       {num("buy_margin_pct", "Margine per comprare (%)", "Compro solo se il guadagno stimato verso il prezzo obiettivo supera questa percentuale.")}
       {num("min_confidence", "Fiducia minima per l'autopilot (0-100)", "Le idee con fiducia inferiore restano in attesa della tua approvazione.", "1")}
-      <label>Orari di scansione (ora di New York)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>
+      <label>Orari scansione USA (ora di New York)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa USA. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>
+      <label>Orari scansione Europa (ora italiana)<input type="text" value={String(s.scan_times_eu)} onChange={(e) => set("scan_times_eu", e.target.value)} /><small>Giorni di borsa europei (apertura 09:00–17:30). 08:30 = pre-apertura. Esempio: 08:30, 11:00, 15:00</small></label>
       <label className="row"><input type="checkbox" checked={!!s.alerts_enabled} onChange={(e) => set("alerts_enabled", e.target.checked)} /> Alert su Telegram attivi</label>
       <label className="row"><input type="checkbox" checked={!!s.allow_discovery} onChange={(e) => set("allow_discovery", e.target.checked)} /> Cerca anche titoli fuori dalla watchlist</label>
       <label className="row"><input type="checkbox" checked={!!s.auto_follow_sell_ideas} onChange={(e) => set("auto_follow_sell_ideas", e.target.checked)} /> L&apos;autopilot vende anche sulle idee di vendita (oltre che sulle soglie)</label>

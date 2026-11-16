@@ -1,8 +1,8 @@
 import { requireAuth } from "@/lib/auth";
 import { makeDeps } from "@/lib/deps";
 import { snapshot, type Snapshot } from "@/lib/engine";
-import { sessionOf, etLabel } from "@/lib/time";
-import { num, pct, usd } from "@/lib/format";
+import { sessionOf, etLabel, euSessionOf } from "@/lib/time";
+import { fmtPrice, num, pct, usd } from "@/lib/format";
 import { CloseButton, KillSwitch, ScanButton } from "./components/Controls";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,7 @@ export default async function Home() {
   const d = makeDeps();
   const now = new Date();
   const sess = sessionOf(now);
+  const eu = euSessionOf(now);
   let snap: Snapshot | null = null;
   let error = "";
   try { snap = await snapshot(d); } catch (e) { error = (e as Error).message; }
@@ -41,7 +42,9 @@ export default async function Home() {
       </div>
       <div className="row" style={{ margin: "14px 0" }}>
         <span className={`badge ${settings.mode === "autopilot" ? "danger" : ""}`}>{settings.mode === "autopilot" ? "AUTOPILOT" : "CONSULENTE"}</span>
-        <span className="badge">{SESSION_LABEL[sess.session]} · {etLabel(now)} ET</span>
+        <span className="badge">USA: {SESSION_LABEL[sess.session]}</span>
+        <span className="badge">Europa: {SESSION_LABEL[eu.session]}</span>
+        <span className="muted">{etLabel(now)}</span>
         <span className="muted">Idee in attesa: <a href="/suggerimenti">{pending.length}</a></span>
         {settings.mode === "autopilot" && <KillSwitch active={settings.kill_switch} />}
       </div>
@@ -56,8 +59,8 @@ export default async function Home() {
               <tr key={p.positionId}>
                 <td><b>{p.symbol}</b></td>
                 <td>{num(p.unitsEff)}</td>
-                <td>{usd(p.openRate)}</td>
-                <td>{usd(p.bid)}</td>
+                <td>{fmtPrice(p.symbol, p.openRate)}</td>
+                <td>{fmtPrice(p.symbol, p.bid)}</td>
                 <td>{usd(p.amount)}</td>
                 <td>{usd(p.value)}</td>
                 <td className={cls(p.pnl)}>{usd(p.pnl)} <small>({pct(p.pnlPct)})</small></td>

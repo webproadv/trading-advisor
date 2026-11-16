@@ -1,3 +1,4 @@
+import { marketOf } from "./time";
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 export const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
@@ -36,4 +37,10 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Pr
   });
   await Promise.all(workers);
   return out;
+}
+
+/** Prezzo di un titolo nella sua valuta di quotazione (USD, EUR, CHF). */
+export function fmtPrice(symbol: string, n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "n/d";
+  return new Intl.NumberFormat("it-IT", { style: "currency", currency: marketOf(symbol).currency }).format(n);
 }

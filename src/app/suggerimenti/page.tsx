@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { makeStore } from "@/lib/deps";
-import { usd, pct, num } from "@/lib/format";
+import { usd, pct, num, fmtPrice } from "@/lib/format";
 import { upsidePct } from "@/lib/risk";
 import { SuggestionCard } from "../components/Controls";
 
@@ -24,11 +24,11 @@ export default async function Suggerimenti() {
             <div className="card sugg" key={s.id}>
               <div className="row"><h3 style={{ color: s.side === "buy" ? "var(--buy)" : "var(--sell)" }}>{s.side === "buy" ? "COMPRA" : "VENDI"} {s.symbol}</h3>
                 <span className="badge">fiducia {s.confidence}/100</span><span className="badge">{ST[s.status]}</span></div>
-              <div className="meta">Prezzo di riferimento {usd(s.price_ref)} · proposta {num(s.units)} azioni (≈ {usd(s.amount_usd)})
-                {s.target_price ? ` · obiettivo ${usd(s.target_price)}${up !== null ? ` (${pct(up)})` : ""}` : ""}{s.stop_price ? ` · stop ${usd(s.stop_price)}` : ""}</div>
+              <div className="meta">Prezzo di riferimento {fmtPrice(s.symbol, s.price_ref)} · proposta {num(s.units)} azioni (≈ {usd(s.amount_usd)})
+                {s.target_price ? ` · obiettivo ${fmtPrice(s.symbol, s.target_price)}${up !== null ? ` (${pct(up)})` : ""}` : ""}{s.stop_price ? ` · stop ${fmtPrice(s.symbol, s.stop_price)}` : ""}</div>
               <div>{s.rationale}</div>
               {s.sources?.length > 0 && <div className="src">Fonti: {s.sources.map((x) => <a key={x.url} href={x.url} target="_blank" rel="noopener noreferrer">{x.title || x.url}</a>)}</div>}
-              {s.status === "pending" && <SuggestionCard id={s.id} side={s.side} units={s.units} price={s.price_ref} symbol={s.symbol} />}
+              {s.status === "pending" && <SuggestionCard id={s.id} side={s.side} units={s.units} price={s.units > 0 ? s.amount_usd / s.units : s.price_ref} symbol={s.symbol} />}
             </div>
           );
         })}

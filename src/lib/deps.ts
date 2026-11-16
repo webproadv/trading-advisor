@@ -1,6 +1,7 @@
 import { ClaudeAnalyst } from "./claude";
 import type { Deps } from "./engine";
 import { EtoroClient } from "./etoro";
+import { usdPer } from "./fx";
 import { SupabaseStore } from "./store";
 import { Telegram } from "./telegram";
 
@@ -20,8 +21,10 @@ export function makeTelegram() {
   return new Telegram(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID);
 }
 export function makeDeps(): Deps {
+  const store = makeStore();
   return {
-    store: makeStore(),
+    store,
+    fx: (currency: string) => usdPer(currency, store, new Date()),
     etoro: makeEtoro(),
     tg: makeTelegram(),
     claude: new ClaudeAnalyst(process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5"),

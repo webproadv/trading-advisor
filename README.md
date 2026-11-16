@@ -22,6 +22,13 @@ Web app (Next.js su Vercel + Supabase) che ti fa da consulente: mostra giacenza 
 7. Apri `/api/debug` (da loggato): mostra la risposta grezza di eToro e come l'app la interpreta. **Controllalo prima di fidarti dei numeri**: i formati di risposta eToro non sono tutti documentati e il parser è tollerante ma non testato dal vivo.
 8. Aggiungi titoli alla watchlist, lascia la modalità *Consulente* per qualche giorno e verifica le idee prima di attivare l'Autopilot.
 
+## Borse supportate
+- **USA** (NYSE/Nasdaq): titoli senza suffisso (AAPL, NVDA). Sessione 09:30–16:00 ora di New York, con premarket.
+- **Europa**: Milano (.MI), Madrid (.MC), Francoforte (.DE), Parigi (.PA), Amsterdam (.AS), Bruxelles (.BR), Lisbona (.LS), Vienna (.VI), Helsinki (.HE), Zurigo (.SW). Sessione 09:00–17:30 ora italiana, pre-apertura dalle 08:00. Simboli eToro con suffisso: ENI.MI, SAN.MC, BMW.DE.
+- Ogni mercato ha orari, festività e scansioni propri. Prezzi in EUR/CHF vengono convertiti in USD (cambio BCE via frankfurter.dev) per importi e limiti, che restano in USD.
+- Non ancora supportati: Londra (prezzi in pence) e borse nordiche. Il calendario europeo è semplificato: l'app non opera nei giorni in cui chiude almeno una delle borse supportate.
+- Da verificare con il conto demo: che i titoli europei siano acquistabili e che il simbolo con suffisso venga trovato dalla ricerca eToro.
+
 ## Limiti da conoscere
 - Mai provata su servizi reali (eToro, Supabase, Telegram, Anthropic): i 32 test usano simulazioni.
 - Funzioni Vercel Hobby: massimo 60 s; la scansione Claude usa un timeout di 52 s.
