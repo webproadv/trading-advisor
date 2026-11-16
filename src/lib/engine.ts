@@ -344,6 +344,8 @@ export async function rejectSuggestion(d: Deps, id: number): Promise<ExecResult>
 }
 
 /** Chiusura manuale/automatica diretta di un titolo (senza passare da un'idea). */
+export class MarketClosedError extends Error {}
+
 export async function closeSymbol(d: Deps, instrumentId: number, units: number | null, by: "manual" | "autopilot", note: string): Promise<string> {
   const now = d.now();
   const day = romeDay(now);
@@ -351,7 +353,10 @@ export async function closeSymbol(d: Deps, instrumentId: number, units: number |
   if (!rate) throw new Error("prezzo non disponibile");
   const pf = await d.etoro.portfolio();
   const sm = await symMap(d);
-  const symbol = sm[String(instrumentId)] ?? `ID ${instrumentId}`;
+  const known = sm[String(instrumentId)];
+  const symbol = known ?? `ID ${instrumentId}`;
+  // controllo di mercato sul listino del titolo (USA o europeo); se il simbolo non e' noto decide eToro
+  if (known && !isRegularFor(known, now)) throw new MarketClosedError(`Mercato ${marketOf(known).group === "US" ? "USA" : "europeo"} chiuso: la vendita e' possibile solo a mercato aperto.`);
   const k = await fxOf(d, symbol);
   const mine = pf.positions.filter((p) => p.isBuy && p.instrumentId === instrumentId)
     .sort((a, b) => String(a.openDateTime).localeCompare(String(b.openDateTime)));

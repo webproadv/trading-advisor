@@ -89,3 +89,27 @@ describe("timeframe intraday", () => {
     expect(bought).toBe(0);
   });
 });
+
+describe("vendita manuale e orari di mercato", () => {
+  it("un titolo europeo si vende a Borsa italiana aperta anche se gli USA sono chiusi", async () => {
+    const { closeSymbol, MarketClosedError } = await import("@/lib/engine");
+    const mk = (iso: string, symbol: string) => {
+      const store = new MemoryStore();
+      store.watch.set(symbol, { symbol, instrument_id: 2, active: true });
+      let closed = 0;
+      const e = { ...etoro,
+        rates: async () => ({ 2: { bid: 10, ask: 10.1 } }),
+        portfolio: async (): Promise<Portfolio> => ({ cash: 100, positions: [{ positionId: "p1", instrumentId: 2, openRate: 9, amount: 90, units: 10, isBuy: true, openDateTime: "2026-07-01T00:00:00Z" }] }),
+        close: async () => { closed++; } };
+      const d: Deps = { store, etoro: e as never, tg, claude: { enabled: false, analyze: async () => ({ summary: "", ideas: [], sources: [] }) }, now: () => new Date(iso), fx: async () => 1.1 } as Deps;
+      return { d, closed: () => closed };
+    };
+    const eu = mk("2026-07-14T07:30:00Z", "ENI.MI"); // 09:30 Roma, 03:30 New York
+    await closeSymbol(eu.d, 2, null, "manual", "t");
+    expect(eu.closed()).toBe(1);
+    const us = mk("2026-07-14T07:30:00Z", "AAPL");
+    await expect(closeSymbol(us.d, 2, null, "manual", "t")).rejects.toBeInstanceOf(MarketClosedError);
+    const euClosed = mk("2026-07-14T16:30:00Z", "ENI.MI"); // 18:30 Roma
+    await expect(closeSymbol(euClosed.d, 2, null, "manual", "t")).rejects.toThrow(/europeo chiuso/);
+  });
+});
