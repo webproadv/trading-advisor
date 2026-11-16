@@ -15,6 +15,7 @@ export default function Login() {
   };
   return (
     <form className="card login" onSubmit={submit}>
+      <div className="orb" style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 14 }}><svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 24, height: 24 }}><path d="M3 17l5-5 4 4 8-9M15 7h5v5" /></svg></div>
       <h1>Accesso</h1>
       <p className="muted">Trading Advisor — conto demo eToro</p>
       <input type="password" autoFocus placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />

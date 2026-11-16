@@ -21,24 +21,26 @@ export default async function Suggerimenti() {
         {pending.map((s) => {
           const up = upsidePct(s.target_price, s.price_ref);
           return (
-            <div className="card sugg" key={s.id}>
-              <div className="row"><h3 style={{ color: s.side === "buy" ? "var(--buy)" : "var(--sell)" }}>{s.side === "buy" ? "COMPRA" : "VENDI"} {s.symbol}</h3>
-                <span className="badge">fiducia {s.confidence}/100</span><span className="badge">{ST[s.status]}</span></div>
+            <div className={`card idea ${s.side}`} key={s.id}>
+              <div className="row"><h3 className={s.side === "buy" ? "pos" : "neg"}>{s.side === "buy" ? "▲ COMPRA" : "▼ VENDI"} {s.symbol}</h3>
+                {s.rationale.startsWith("⏱") && <span className="badge warn">intraday</span>}
+                <span className="badge">{ST[s.status]}</span>
+                <span className={`meter ${s.confidence >= 70 ? "hi" : s.confidence < 50 ? "lo" : ""}`} title="Fiducia calcolata da indicatori, timeframe e analisi"><span className="bar"><i style={{ width: `${Math.min(100, Math.max(0, s.confidence))}%` }} /></span>fiducia {s.confidence}/100</span></div>
               <div className="meta">Prezzo di riferimento {fmtPrice(s.symbol, s.price_ref)} · proposta {num(s.units)} azioni (≈ {usd(s.amount_usd)})
                 {s.target_price ? ` · obiettivo ${fmtPrice(s.symbol, s.target_price)}${up !== null ? ` (${pct(up)})` : ""}` : ""}{s.stop_price ? ` · stop ${fmtPrice(s.symbol, s.stop_price)}` : ""}</div>
-              <div>{s.rationale}</div>
-              {s.sources?.length > 0 && <div className="src">Fonti: {s.sources.map((x) => <a key={x.url} href={x.url} target="_blank" rel="noopener noreferrer">{x.title || x.url}</a>)}</div>}
+              <div className="why">{s.rationale}</div>
+              {s.sources?.length > 0 && <div className="src"><span>Fonti:</span>{s.sources.map((x) => <a key={x.url} href={x.url} target="_blank" rel="noopener noreferrer">{x.title || x.url}</a>)}</div>}
               {s.status === "pending" && <SuggestionCard id={s.id} side={s.side} units={s.units} price={s.units > 0 ? s.amount_usd / s.units : s.price_ref} symbol={s.symbol} />}
             </div>
           );
         })}
       </div>
       <h2>Storico</h2>
-      <div className="scroll"><table>
+      <div className="scroll"><table className="rt">
         <thead><tr><th>Data</th><th>Titolo</th><th>Azione</th><th>Azioni</th><th>Stato</th></tr></thead>
         <tbody>
-          {past.length === 0 && <tr><td colSpan={5} className="muted">Ancora nulla.</td></tr>}
-          {past.map((s) => <tr key={s.id}><td>{new Date(s.created_at).toLocaleString("it-IT")}</td><td>{s.symbol}</td><td>{s.side === "buy" ? "compra" : "vendi"}</td><td>{num(s.units)}</td><td>{ST[s.status]}</td></tr>)}
+          {past.length === 0 && <tr><td colSpan={5} className="empty">Ancora nulla.</td></tr>}
+          {past.map((s) => <tr key={s.id}><td data-label="Data">{new Date(s.created_at).toLocaleString("it-IT")}</td><td className="title" data-label="Titolo">{s.symbol}</td><td data-label="Azione">{s.side === "buy" ? "compra" : "vendi"}</td><td data-label="Azioni">{num(s.units)}</td><td data-label="Stato">{ST[s.status]}</td></tr>)}
         </tbody>
       </table></div>
     </>

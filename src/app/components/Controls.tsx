@@ -93,7 +93,7 @@ export function TelegramSetup() {
 
 export function LogoutButton() {
   const router = useRouter();
-  return <button onClick={async () => { await call("/api/auth/logout", "POST"); router.push("/login"); router.refresh(); }}>Esci</button>;
+  return <button aria-label="Esci" onClick={async () => { await call("/api/auth/logout", "POST"); router.push("/login"); router.refresh(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9" /></svg><span className="lbl">Esci</span></button>;
 }
 
 export function WatchlistEditor({ items }: { items: Array<{ symbol: string; instrument_id: number; name?: string | null }> }) {
@@ -116,7 +116,7 @@ export function WatchlistEditor({ items }: { items: Array<{ symbol: string; inst
       </div>
       <div className="row" style={{ marginTop: 10 }}>
         {items.length === 0 && <span className="muted">Nessun titolo: aggiungine qualcuno (es. AAPL, MSFT, NVDA, SPY).</span>}
-        {items.map((w) => <span key={w.symbol} className="badge">{w.symbol} <a href="#" onClick={(e) => { e.preventDefault(); del(w.symbol); }} title="Rimuovi">✕</a></span>)}
+        {items.map((w) => <span key={w.symbol} className="badge">{w.symbol} <a href="#" aria-label={`Rimuovi ${w.symbol}`} onClick={(e) => { e.preventDefault(); del(w.symbol); }} title="Rimuovi">✕</a></span>)}
       </div>
     </div>
   );

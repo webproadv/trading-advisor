@@ -31,6 +31,7 @@ export default async function Home() {
   return (
     <>
       <h1>Portafoglio demo</h1>
+      <p className="muted" style={{ margin: "0 0 16px" }}>Conto eToro virtuale · dati aggiornati ogni 15 minuti in orario di mercato.</p>
       {error && <div className="error">Impossibile leggere il conto eToro: {error}. Controlla le chiavi demo e la pagina /api/debug.</div>}
       {stale && <div className="notice">Il monitoraggio automatico non risulta attivo{tickAgeMin !== null ? ` (ultimo controllo ${Math.round(tickAgeMin)} minuti fa)` : " (nessun controllo ancora eseguito)"}. Verifica il job pg_cron su Supabase.</div>}
       {settings.kill_switch && <div className="error">Kill switch attivo: nessuna operazione automatica.</div>}
@@ -40,10 +41,10 @@ export default async function Home() {
         <div className="card kpi"><div className="label">Patrimonio totale</div><div className="value">{usd(snap?.equity)}</div></div>
         <div className="card kpi"><div className="label">Utile/perdita aperto</div><div className={`value ${cls(snap?.pnl ?? null)}`}>{usd(snap?.pnl)}</div></div>
       </div>
-      <div className="row" style={{ margin: "14px 0" }}>
-        <span className={`badge ${settings.mode === "autopilot" ? "danger" : ""}`}>{settings.mode === "autopilot" ? "AUTOPILOT" : "CONSULENTE"}</span>
-        <span className="badge">USA: {SESSION_LABEL[sess.session]}</span>
-        <span className="badge">Europa: {SESSION_LABEL[eu.session]}</span>
+      <div className="status">
+        <span className={`badge ${settings.mode === "autopilot" ? "danger" : ""}`}><span className="dot" />{settings.mode === "autopilot" ? "AUTOPILOT" : "CONSULENTE"}</span>
+        <span className={`badge ${sess.session === "regular" ? "ok" : ""}`}>USA · {SESSION_LABEL[sess.session]}</span>
+        <span className={`badge ${eu.session === "regular" ? "ok" : ""}`}>Europa · {SESSION_LABEL[eu.session]}</span>
         <span className="muted">{etLabel(now)}</span>
         <span className="muted">Idee in attesa: <a href="/suggerimenti">{pending.length}</a></span>
         {settings.mode === "autopilot" && <KillSwitch active={settings.kill_switch} />}
@@ -51,20 +52,20 @@ export default async function Home() {
 
       <h2>Posizioni aperte</h2>
       <div className="scroll">
-        <table>
+        <table className="rt">
           <thead><tr><th>Titolo</th><th>Azioni</th><th>Prezzo carico</th><th>Prezzo ora</th><th>Investito</th><th>Valore</th><th>P/L</th><th>Vendi</th></tr></thead>
           <tbody>
-            {(snap?.positions ?? []).length === 0 && <tr><td colSpan={8} className="muted">Nessuna posizione aperta.</td></tr>}
+            {(snap?.positions ?? []).length === 0 && <tr><td colSpan={8} className="empty">Nessuna posizione aperta.</td></tr>}
             {(snap?.positions ?? []).map((p) => (
               <tr key={p.positionId}>
-                <td><b>{p.symbol}</b></td>
-                <td>{num(p.unitsEff)}</td>
-                <td>{fmtPrice(p.symbol, p.openRate)}</td>
-                <td>{fmtPrice(p.symbol, p.bid)}</td>
-                <td>{usd(p.amount)}</td>
-                <td>{usd(p.value)}</td>
-                <td className={cls(p.pnl)}>{usd(p.pnl)} <small>({pct(p.pnlPct)})</small></td>
-                <td>{p.unitsEff ? <CloseButton instrumentId={p.instrumentId} units={p.unitsEff} symbol={p.symbol} /> : <span className="muted">n/d</span>}</td>
+                <td className="title" data-label="Titolo"><b>{p.symbol}</b></td>
+                <td data-label="Azioni">{num(p.unitsEff)}</td>
+                <td data-label="Prezzo carico">{fmtPrice(p.symbol, p.openRate)}</td>
+                <td data-label="Prezzo ora">{fmtPrice(p.symbol, p.bid)}</td>
+                <td data-label="Investito">{usd(p.amount)}</td>
+                <td data-label="Valore">{usd(p.value)}</td>
+                <td data-label="P/L" className={cls(p.pnl)}><span>{usd(p.pnl)} <small>({pct(p.pnlPct)})</small></span></td>
+                <td data-label="Vendi">{p.unitsEff ? <CloseButton instrumentId={p.instrumentId} units={p.unitsEff} symbol={p.symbol} /> : <span className="muted">n/d</span>}</td>
               </tr>
             ))}
           </tbody>
