@@ -184,6 +184,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       {num("take_profit_pct", "Soglia di guadagno per vendere (%)", "Vendo (o ti avviso) quando la posizione guadagna questa percentuale.")}
       {num("stop_loss_pct", "Soglia di perdita per vendere (%)", "Vendo (o ti avviso) quando la posizione perde questa percentuale. Obbligatoria.")}
       {num("buy_margin_pct", "Margine per comprare (%)", "Compro solo se il guadagno stimato verso il prezzo obiettivo supera questa percentuale.")}
+      {num("start_equity", "Capitale iniziale ($)", "Capitale di partenza del conto demo: serve a calcolare l'utile/perdita totale dall'inizio mostrato sotto il patrimonio.", "1")}
       {num("scan_interval_min", "Cerca opportunità ogni (minuti)", "Scansione automatica con analisi di Claude per USA ed Europa, durante premarket e orari di borsa (USA dalle 08:00 ET, Europa dalle 08:00 ora italiana). 0 = solo agli orari fissi qui sotto. Ogni scansione usa l'IA: 15 minuti = circa 70 analisi al giorno.", "1")}
       {num("min_confidence", "Fiducia minima per l'autopilot (0-100)", "Le idee con fiducia inferiore restano in attesa della tua approvazione.", "1")}
       <label>Orari scansione USA (ora di New York, usati se l'intervallo sopra è 0)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa USA. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>

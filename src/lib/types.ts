@@ -13,6 +13,7 @@ export interface Settings {
   max_open_positions: number;
   min_confidence: number;           // fiducia minima (0-100) per l'autopilot
   auto_follow_sell_ideas: boolean;  // l'autopilot vende anche su idee di vendita (non solo soglie)
+  start_equity: number;             // capitale di partenza del conto demo (per l'utile/perdita totale)
   scan_interval_min: number;        // scansione automatica con Claude ogni N minuti (0 = solo orari fissi)
   scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa USA
   scan_times_eu: string[];          // orari "HH:MM" (ora italiana), giorni di borsa europei
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   max_open_positions: 5,
   min_confidence: 70,
   auto_follow_sell_ideas: false,
+  start_equity: 100000,
   scan_interval_min: 15,
   scan_times: ["08:00", "10:00", "14:00"],
   scan_times_eu: ["08:30", "11:00", "15:00"],

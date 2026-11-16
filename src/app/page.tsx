@@ -29,6 +29,7 @@ export default async function Home() {
   const stale = tickAgeMin === null || tickAgeMin > 15;
 
   const pnlPct = snap && snap.invested > 0 ? (snap.pnl / snap.invested) * 100 : null;
+  const totalPl = snap?.equity != null && settings.start_equity > 0 ? snap.equity - settings.start_equity : null;
   const tot = (snap?.cash ?? 0) + (snap?.value ?? 0);
   const invPct = tot > 0 ? Math.min(100, ((snap?.value ?? 0) / tot) * 100) : 0;
   const arrow = (n: number | null | undefined) => (n == null ? "" : n >= 0 ? "▲" : "▼");
@@ -42,7 +43,8 @@ export default async function Home() {
 
       <section className="card hero" aria-label="Riepilogo conto">
         <div className="top">
-          <div><div className="label">Patrimonio totale</div><div className="equity">{usd(snap?.equity)}</div></div>
+          <div><div className="label">Patrimonio totale</div><div className="equity">{usd(snap?.equity)}</div>
+            {totalPl !== null && <div className={`totpl ${cls(totalPl)}`}>{usd(totalPl)}</div>}</div>
           <div className="plbox">
             <div className="label">Utile / perdita aperto</div>
             <div className={`big ${cls(snap?.pnl ?? null)}`}>{usd(snap?.pnl)}</div>
