@@ -2,6 +2,7 @@
 import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
 import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
+import { blendConfidence, quantConfidence } from "./confidence";
 import { analyze, favorableBuy, favorableSell, techPanel, type Analysis, type Tech } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
@@ -165,10 +166,11 @@ export async function proposeIdea(
     const cashOnly = c.snap.cash === null ? Infinity : Math.max(0, c.snap.cash * 0.98);
     const amount = round2(Math.min(settings.max_position_usd, cashOnly));
     if (amount < MIN_ORDER_USD) return { skipped: size.reasons[0] ?? "giacenza insufficiente" };
+    const bl = await confidenceFor(d, symbol, "buy", price, target, stop, idea, settings, null);
     const created = await d.store.createSuggestion({
       symbol, instrument_id: id, side: "buy", units: round4(amount / (price * k)), amount_usd: amount, price_ref: price,
-      target_price: round2(target), stop_price: round2(stop), confidence: clamp(idea.confidence, 0, 100),
-      rationale: idea.rationale, sources: refs, origin, expires_at,
+      target_price: round2(target), stop_price: round2(stop), confidence: bl.confidence,
+      rationale: `${idea.rationale}\n${bl.note}`.trim(), sources: refs, origin, expires_at,
     });
     return { created };
   }
@@ -179,12 +181,25 @@ export async function proposeIdea(
   const units = held.reduce((s, p) => s + (p.unitsEff ?? 0), 0);
   const price = rate.bid;
   const ks = await fxOf(d, symbol);
+  const pnlPct = held[0]?.pnlPct ?? null;
+  const bs = await confidenceFor(d, symbol, "sell", price, idea.target_price, idea.stop_price, idea, settings, pnlPct);
   const created = await d.store.createSuggestion({
     symbol, instrument_id: id, side: "sell", units: round4(units), amount_usd: round2(units * price * ks), price_ref: price,
-    target_price: idea.target_price, stop_price: idea.stop_price, confidence: clamp(idea.confidence, 0, 100),
-    rationale: idea.rationale, sources: refs, origin, expires_at,
+    target_price: idea.target_price, stop_price: idea.stop_price, confidence: bs.confidence,
+    rationale: `${idea.rationale}\n${bs.note}`.trim(), sources: refs, origin, expires_at,
   });
   return { created };
+}
+
+/** Fiducia finale di un'idea: dati quantitativi (indicatori salvati) combinati con quella dichiarata da Claude. */
+async function confidenceFor(
+  d: Deps, symbol: string, side: "buy" | "sell", price: number, target: number | null, stop: number | null,
+  idea: RawIdea, settings: Settings, pnlPct: number | null,
+) {
+  const [analysis, tech] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${symbol}`), d.store.kvGet<Tech>(`tech:${symbol}`)]);
+  const q = quantConfidence({ side, price, target, stop, analysis, tech, pnlPct, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
+  const ruleOnly = idea.rule === true;
+  return blendConfidence(ruleOnly ? null : clamp(idea.confidence, 0, 100), q, ruleOnly);
 }
 
 async function proposeCtx(d: Deps, snap: Snapshot, rates: Record<number, Rate>): Promise<ProposeCtx> {
@@ -377,7 +392,7 @@ export async function favorableSweep(d: Deps, snap: Snapshot): Promise<string[]>
     const holding = snap.positions.some((p) => p.instrumentId === w.instrument_id);
     if (!holding && tech?.signals.verdict !== "sell" && favorableBuy(a, r.ask) && (await once(d, `fav:${w.symbol}:${c.day}`))) {
       const idea: RawIdea = {
-        symbol: w.symbol, side: "buy", confidence: 50, target_price: r.ask * (1 + c.settings.take_profit_pct / 100), stop_price: null, source_urls: [],
+        symbol: w.symbol, side: "buy", confidence: 50, rule: true, target_price: r.ask * (1 + c.settings.take_profit_pct / 100), stop_price: null, source_urls: [],
         rationale: `Segnale tecnico: trend rialzista, ritracciamento vicino alla media a 20 giorni (RSI ${a.rsi14?.toFixed(0)}). Idea generata da regole, non da analisi di notizie.`,
       };
       const res = await proposeIdea(d, c, idea, [], "monitor");
@@ -387,7 +402,7 @@ export async function favorableSweep(d: Deps, snap: Snapshot): Promise<string[]>
       }
     } else if (holding && favorableSell(a, r.bid) && (await once(d, `weak:${w.symbol}:${c.day}`))) {
       const idea: RawIdea = {
-        symbol: w.symbol, side: "sell", confidence: 50, target_price: null, stop_price: null, source_urls: [],
+        symbol: w.symbol, side: "sell", confidence: 50, rule: true, target_price: null, stop_price: null, source_urls: [],
         rationale: `Segnale tecnico di debolezza su ${w.symbol} (prezzo sotto la media a 20 giorni o RSI molto alto). Regola automatica.`,
       };
       const res = await proposeIdea(d, c, idea, [], "monitor");
@@ -448,12 +463,12 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   }
   if (!usedClaude) {
     for (const r of rows.filter((x) => x.trend === "up" && x.rsi14 !== null && x.rsi14 < 60 && x.score >= 3 && x.tech?.votes.verdict !== "sell").slice(0, 3)) {
-      ideas.push({ symbol: r.symbol, side: "buy", confidence: 50, target_price: r.price * (1 + settings.take_profit_pct / 100), stop_price: null, source_urls: [],
+      ideas.push({ symbol: r.symbol, side: "buy", confidence: 50, rule: true, target_price: r.price * (1 + settings.take_profit_pct / 100), stop_price: null, source_urls: [],
         rationale: `Segnale tecnico (trend rialzista, RSI ${r.rsi14?.toFixed(0)}, momentum 20g ${pct(r.mom20Pct)}). Regola automatica.` });
     }
     for (const p of snap.positions.filter((x) => marketOf(x.symbol).group === scope)) {
       const a = await d.store.kvGet<Analysis>(`analysis:${p.symbol}`);
-      if (a && p.bid && favorableSell(a, p.bid)) ideas.push({ symbol: p.symbol, side: "sell", confidence: 50, target_price: null, stop_price: null, source_urls: [],
+      if (a && p.bid && favorableSell(a, p.bid)) ideas.push({ symbol: p.symbol, side: "sell", confidence: 50, rule: true, target_price: null, stop_price: null, source_urls: [],
         rationale: "Segnale tecnico di debolezza. Regola automatica." });
     }
   }

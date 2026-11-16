@@ -39,3 +39,4 @@ input[type=number] { width: 110px; } input[type=text], input[type=password] { wi
 form.settings { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 form.settings label { display: grid; gap: 4px; font-weight: 600; } form.settings small { font-weight: 400; color: var(--muted); }
 .login { max-width: 360px; margin: 14vh auto; } .src a { margin-right: 10px; font-size: 13px; }
+.sugg div { white-space: pre-line; }

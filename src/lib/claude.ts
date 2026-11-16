@@ -24,6 +24,8 @@ export interface AnalysisContext {
 export interface RawIdea {
   symbol: string; side: "buy" | "sell"; confidence: number; target_price: number | null; stop_price: number | null;
   rationale: string; source_urls: string[];
+  /** true = idea generata solo da regole tecniche (nessuna analisi di notizie). */
+  rule?: boolean;
 }
 export interface AnalysisResult { summary: string; ideas: RawIdea[]; sources: SourceRef[] }
 
@@ -38,6 +40,7 @@ Regole:
 - Per ogni idea indica un prezzo target e uno stop realistici rispetto al prezzo attuale. "source_urls" deve contenere solo URL che hai effettivamente trovato con la ricerca.
 - Risposta FINALE: esclusivamente un oggetto JSON, senza testo prima o dopo, con questa forma:
 {"summary": "max 500 caratteri sul contesto di mercato", "ideas": [{"symbol":"AAPL","side":"buy"|"sell","confidence":0-100,"target_price":number,"stop_price":number,"rationale":"max 450 caratteri, in italiano, con il motivo e i rischi","source_urls":["https://..."]}]}
+- "confidence" deve essere calibrata, non un valore di default: 80+ solo se notizie e indicatori tecnici concordano e il rapporto rischio/rendimento e' almeno 2; 60-79 se i segnali sono buoni ma con un punto debole; sotto 60 se ci sono contrasti. Non usare 50 per abitudine. Il sistema la combinera' con un punteggio quantitativo.
 - Al massimo 6 idee.`;
 
 const MARKET_US = "Proponi solo azioni/ETF quotati negli USA, acquistabili su eToro.";

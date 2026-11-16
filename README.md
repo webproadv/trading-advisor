@@ -41,3 +41,11 @@ Per ogni titolo in watchlist l'app calcola, su candele giornaliere con il prezzo
 
 ## Sviluppo
 `npm install` · `npm test` · `npm run typecheck` · `npm run build`
+
+## Tasso di fiducia
+
+La fiducia di ogni idea non è più un valore fisso (50): viene calcolata da `src/lib/confidence.ts` con tutti i dati disponibili — trend (SMA20/50), momentum, RSI, MACD, ADX/DI, Stoch/StochRSI, Williams, CCI, pivot, rapporto rischio/rendimento (target/stop), volatilità ATR e, in vendita, il rendimento già maturato.
+
+- **Con analisi di Claude**: fiducia finale = media 50/50 tra la fiducia di Claude e quella quantitativa. Se divergono di oltre 35 punti compare un avviso.
+- **Solo regole (senza notizie)**: fiducia quantitativa con tetto 65, quindi sotto la soglia autopilot predefinita (70): per operare in automatico serve anche la lettura delle notizie.
+- Il dettaglio (punteggio per componente) è scritto nella motivazione dell'idea.
