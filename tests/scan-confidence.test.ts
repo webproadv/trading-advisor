@@ -44,3 +44,25 @@ describe("scansione: fiducia calcolata", () => {
     expect(s.rationale).toMatch(/media tra Claude \(95\)/);
   });
 });
+
+describe("aggiornamento ogni 15 minuti", () => {
+  it("aggiorna gli indicatori, ricalcola la fiducia e rispetta l'intervallo", async () => {
+    const { refreshSweep } = await import("@/lib/engine");
+    const store = new MemoryStore();
+    store.watch.set("AAA", { symbol: "AAA", instrument_id: 1, active: true });
+    const claude = { enabled: true, analyze: async () => ({ summary: "ok", sources: [], ideas: [
+      { symbol: "AAA", side: "buy" as const, confidence: 95, target_price: wavy.at(-1)! * 1.15, stop_price: wavy.at(-1)! * 0.95, rationale: "t", source_urls: [] }] }) };
+    let t = NOW.getTime();
+    const d: Deps = { store, etoro: etoro as never, tg, claude, now: () => new Date(t) };
+    const r = await runScan(d, "2026-07-14@08:00");
+    const id = r.created[0].id;
+    await store.updateSuggestion(id, { confidence: 1 }); // valore vecchio da correggere
+    const out = await refreshSweep(d, "US");
+    expect(out[0]).toMatch(/1 titoli aggiornati, 1 fiducie/);
+    expect((await store.getSuggestion(id))!.confidence).toBeGreaterThan(1);
+    expect(await refreshSweep(d, "US")).toEqual([]); // troppo presto
+    t += 15 * 60_000;
+    expect((await refreshSweep(d, "US")).length).toBe(1);
+    expect(await refreshSweep(d, "EU")).toEqual([]); // nessun titolo europeo in watchlist
+  });
+});

@@ -49,3 +49,7 @@ La fiducia di ogni idea non è più un valore fisso (50): viene calcolata da `sr
 - **Con analisi di Claude**: fiducia finale = media 50/50 tra la fiducia di Claude e quella quantitativa. Se divergono di oltre 35 punti compare un avviso.
 - **Solo regole (senza notizie)**: fiducia quantitativa con tetto 65, quindi sotto la soglia autopilot predefinita (70): per operare in automatico serve anche la lettura delle notizie.
 - Il dettaglio (punteggio per componente) è scritto nella motivazione dell'idea.
+
+## Aggiornamento ogni 15 minuti
+
+Ogni 15 minuti, durante premarket e sessione regolare (USA e Europa, separatamente), il tick aggiorna gli indicatori di tutta la watchlist e dei titoli con idee in attesa, usando il prezzo live, e ricalcola la fiducia delle idee di acquisto in attesa (la parte di Claude resta quella originale, quella tecnica è aggiornata). L'autopilot, che gira subito dopo nello stesso tick, decide quindi su dati con al massimo 15 minuti. Non usa Claude né ricerca web: le analisi con notizie restano agli orari "scansione" delle Impostazioni.

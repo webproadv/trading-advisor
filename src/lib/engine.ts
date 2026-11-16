@@ -57,7 +57,7 @@ export function dropIncomplete(candles: Candle[], intervalSec: number, now: Date
 }
 
 // ------------------------------------------------------------------ analisi tecnica live
-const TECH_TTL_MS = 30 * 60_000;
+const TECH_TTL_MS = 14 * 60_000;
 
 /** Scarica le candele giornaliere, calcola analisi di trend e pannello tecnico con prezzo live, e li salva. */
 export async function refreshTech(d: Deps, symbol: string, instrumentId: number, live: number | null): Promise<{ a: Analysis; tech: Tech | null } | null> {
@@ -172,6 +172,7 @@ export async function proposeIdea(
       target_price: round2(target), stop_price: round2(stop), confidence: bl.confidence,
       rationale: `${idea.rationale}\n${bl.note}`.trim(), sources: refs, origin, expires_at,
     });
+    await d.store.kvSet(`conf:${created.id}`, { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true });
     return { created };
   }
 
@@ -188,6 +189,7 @@ export async function proposeIdea(
     target_price: idea.target_price, stop_price: idea.stop_price, confidence: bs.confidence,
     rationale: `${idea.rationale}\n${bs.note}`.trim(), sources: refs, origin, expires_at,
   });
+  await d.store.kvSet(`conf:${created.id}`, { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true });
   return { created };
 }
 
@@ -567,6 +569,49 @@ export async function dailySummary(d: Deps): Promise<void> {
   await notify(d, lines.join("\n"));
 }
 
+
+// ------------------------------------------------------------------ aggiornamento dati ogni 15 minuti
+export const REFRESH_MIN = 15;
+
+/** Aggiorna indicatori e fiducia delle idee in attesa per un mercato (USA o Europa), al massimo ogni REFRESH_MIN minuti. */
+export async function refreshSweep(d: Deps, scope: Group): Promise<string[]> {
+  const now = d.now();
+  const sess = scope === "EU" ? euSessionOf(now) : sessionOf(now);
+  if (sess.session !== "premarket" && sess.session !== "regular") return [];
+  const last = await d.store.kvGet<{ ts: string }>(`refresh:${scope}`);
+  if (last && now.getTime() - new Date(last.ts).getTime() < (REFRESH_MIN - 1) * 60_000) return [];
+  await d.store.kvSet(`refresh:${scope}`, { ts: now.toISOString() });
+
+  const settings = await d.store.getSettings();
+  const watch = (await d.store.listWatchlist()).filter((w) => w.active && marketOf(w.symbol).group === scope);
+  const pending = (await d.store.listSuggestions(["pending"], 100)).filter((x) => marketOf(x.symbol).group === scope);
+  const targets = new Map<number, string>();
+  for (const w of watch) targets.set(w.instrument_id, w.symbol);
+  for (const x of pending) targets.set(x.instrument_id, x.symbol);
+  if (!targets.size) return [];
+  const rates = await d.etoro.rates([...targets.keys()]);
+
+  let refreshed = 0;
+  await mapLimit([...targets.entries()], 3, async ([id, symbol]) => {
+    try { if (await refreshTech(d, symbol, id, rates[id]?.ask ?? null)) refreshed++; }
+    catch (e) { await d.store.logEvent("tech_refresh_error", { symbol, error: (e as Error).message }); }
+  });
+
+  let rescored = 0;
+  for (const x of pending.filter((y) => y.side === "buy")) { // le vendite dipendono dal P&L reale: le ricalcola il monitor
+    const meta = await d.store.kvGet<{ claude: number | null; rule: boolean }>(`conf:${x.id}`);
+    const r = rates[x.instrument_id];
+    if (!meta || !r) continue;
+    const price = x.side === "buy" ? r.ask : r.bid;
+    const [analysis, tech] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${x.symbol}`), d.store.kvGet<Tech>(`tech:${x.symbol}`)]);
+    const q = quantConfidence({ side: x.side, price, target: x.target_price, stop: x.stop_price, analysis, tech, pnlPct: null, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
+    const bl = blendConfidence(meta.rule ? null : meta.claude, q, meta.rule);
+    if (bl.confidence !== x.confidence) { await d.store.updateSuggestion(x.id, { confidence: bl.confidence }); rescored++; }
+  }
+  await d.store.kvSet(`refresh:${scope}`, { ts: now.toISOString(), refreshed, rescored });
+  return [`${scope}: ${refreshed} titoli aggiornati, ${rescored} fiducie ricalcolate`];
+}
+
 // ------------------------------------------------------------------ tick (chiamato ogni 5 minuti)
 export interface TickResult { session: string; did: string[]; skipped?: string }
 
@@ -586,6 +631,11 @@ export async function tick(d: Deps): Promise<TickResult> {
     if (sess.calendarStale && (await once(d, `calstale:${sess.day.slice(0, 4)}`)))
       await notify(d, "⚠️ Il calendario delle festivita' di borsa dell'app e' scaduto: aggiornalo in src/lib/time.ts.");
     await expireSuggestions(d);
+
+    for (const scope of ["US", "EU"] as const) {
+      try { const r = await refreshSweep(d, scope); if (r.length) did.push(`aggiornamento ${r[0]}`); }
+      catch (e) { await d.store.logEvent("tick_error", { step: `refresh ${scope}`, error: (e as Error).message }); }
+    }
 
     if (sess.session === "regular" || eu.session === "regular") {
       const guard = async (name: string, fn: () => Promise<unknown>) => {
