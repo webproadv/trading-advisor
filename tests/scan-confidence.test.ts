@@ -139,3 +139,23 @@ describe("acquisto manuale dalla pagina Analisi", () => {
     expect(closed.bought.length).toBe(0);
   });
 });
+
+describe("credito Anthropic esaurito", () => {
+  it("mette in pausa Claude, avvisa una sola volta e usa le regole", async () => {
+    const store = new MemoryStore();
+    store.watch.set("AAA", { symbol: "AAA", instrument_id: 1, active: true });
+    let calls = 0; const sent: string[] = [];
+    const claude = { enabled: true, analyze: async () => { calls++; throw new Error('Anthropic HTTP 400: {"message":"Your credit balance is too low to access the Anthropic API"}'); } };
+    const tg2 = { ...tg, enabled: true, send: async (m: string) => { sent.push(m); } };
+    let t = NOW.getTime();
+    const d: Deps = { store, etoro: etoro as never, tg: tg2, claude, now: () => new Date(t) };
+    await runScan(d, "2026-07-14@08:00");
+    t += 15 * 60_000;
+    await runScan(d, "2026-07-14@08:15");
+    expect(calls).toBe(1); // la seconda scansione non richiama Claude
+    expect(sent.filter((m) => /sospesa/.test(m)).length).toBe(1);
+    t += 61 * 60_000;
+    await runScan(d, "2026-07-14@09:30");
+    expect(calls).toBe(2); // dopo un'ora riprova
+  });
+});

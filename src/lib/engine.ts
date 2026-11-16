@@ -521,7 +521,8 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   let sources: SourceRef[] = [];
   let usedClaude = false;
 
-  if (d.claude.enabled) {
+  const paused = await d.store.kvGet<{ until: string }>("claude_pause");
+  if (d.claude.enabled && !(paused && new Date(paused.until).getTime() > now.getTime())) {
     try {
       const res = await d.claude.analyze({
         nowIso: now.toISOString(), scope, session: sess.session, premarket: isPremarketSlot(slot), allowDiscovery: settings.allow_discovery,
@@ -530,8 +531,15 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
       });
       ideas = res.ideas; summary = res.summary; sources = res.sources; usedClaude = true;
     } catch (e) {
-      await d.store.logEvent("claude_error", { error: (e as Error).message });
-      await notify(d, `⚠️ Analisi Claude non riuscita (${esc((e as Error).message.slice(0, 150))}): uso solo le regole tecniche.`);
+      const msg = (e as Error).message;
+      await d.store.logEvent("claude_error", { error: msg });
+      // credito Anthropic esaurito o chiave non valida: inutile riprovare ogni 15 minuti, pausa di 1 ora e un solo avviso
+      const billing = /credit balance|billing|invalid x-api-key|authentication/i.test(msg);
+      if (billing) {
+        await d.store.kvSet("claude_pause", { until: new Date(now.getTime() + 60 * 60_000).toISOString() });
+        if (await once(d, `claude_billing:${romeDay(now)}:${Math.floor(now.getTime() / (6 * 3600_000))}`))
+          await notify(d, "⚠️ Analisi Claude sospesa: credito Anthropic esaurito o chiave non valida. Ricarica su console.anthropic.com → Plans & Billing. Intanto l'app usa solo le regole tecniche e riprova ogni ora.");
+      } else await notify(d, `⚠️ Analisi Claude non riuscita (${esc(msg.slice(0, 150))}): uso solo le regole tecniche.`);
     }
   }
   if (!usedClaude) {

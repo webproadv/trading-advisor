@@ -77,3 +77,7 @@ Ogni titolo della watchlist ha un campo "azioni" e il pulsante **Compra** (deskt
 ## Ricerca opportunità automatica ogni 15 minuti
 
 Impostazione "Cerca opportunità ogni (minuti)" (default 15, 0 = solo orari fissi): ogni N minuti il tick lancia la stessa ricerca del pulsante "Cerca opportunità" (Claude + ricerca web + indicatori su 4 timeframe) per **USA** (da premarket 08:00 ET alla chiusura) ed **Europa** (da pre-apertura 08:00 alla chiusura), nei giorni di borsa. Il tick gira ogni 5 minuti e fa al massimo una scansione per volta: se USA ed Europa sono dovute insieme, la seconda parte 5 minuti dopo. Ogni scansione usa l'IA (circa 70 al giorno con 15 minuti): aumenta l'intervallo per spendere meno.
+
+## Credito Anthropic esaurito
+
+Se l'API Anthropic risponde con errore di credito/chiave (`credit balance is too low`, `invalid x-api-key`), l'analisi Claude viene sospesa per 1 ora (`claude_pause` in kv) e viene inviato un solo avviso Telegram ogni 6 ore. Nel frattempo l'app usa solo le regole tecniche (confidenza massima 65, quindi l'autopilot non acquista). Ricarica il credito su console.anthropic.com → Plans & Billing. Per ridurre i costi aumenta `scan_interval_min` (30/60) nelle Impostazioni.
