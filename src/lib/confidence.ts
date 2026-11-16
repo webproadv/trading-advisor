@@ -1,7 +1,7 @@
 // Punteggio di fiducia (0-100) calcolato dai dati quantitativi: trend, 9 indicatori, ADX, RSI, MACD, pivot,
 // rapporto rischio/rendimento e volatilita'. Serve a sostituire il valore fisso 50 delle idee da regole
 // e a correggere (non sostituire) la fiducia dichiarata da Claude.
-import type { Analysis, Tech } from "./indicators";
+import { mtfSummary, type Analysis, type Mtf, type Tech } from "./indicators";
 
 export interface ConfInput {
   side: "buy" | "sell";
@@ -10,6 +10,8 @@ export interface ConfInput {
   stop: number | null;
   analysis: Analysis | null;
   tech: Tech | null;
+  /** Indicatori su 30 minuti, 1 ora e 4 ore (opzionale). */
+  mtf?: Mtf | null;
   /** P/L % della posizione (solo vendite). */
   pnlPct?: number | null;
   takeProfitPct?: number;
@@ -60,6 +62,10 @@ export function quantConfidence(i: ConfInput): ConfResult {
   // 6) prezzo rispetto al pivot
   const p = t?.pivots?.p ?? null;
   add("pivot", p === null ? 2 : (buy ? i.price > p : i.price < p) ? 5 : 0, 5);
+
+  // 6b) allineamento dei timeframe intraday (30m, 1h, 4h) con la direzione dell'idea
+  const al = mtfSummary(i.mtf ?? null).alignment;
+  add("timeframe 30m/1h/4h", al === null ? 5 : clamp(5 + (buy ? 1 : -1) * al * 5, 0, 10), 10);
 
   if (buy) {
     // 7) rischio/rendimento (stop mancante: 2 x ATR)

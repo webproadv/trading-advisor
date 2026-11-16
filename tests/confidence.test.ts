@@ -25,7 +25,7 @@ describe("fiducia quantitativa", () => {
     const bad = quantConfidence({ side: "buy", price: falling.at(-1)!, target: falling.at(-1)! * 1.15, stop: falling.at(-1)! * 0.95, ...dn });
     expect(good.score).toBeGreaterThan(bad.score + 25);
     expect(good.score).not.toBe(50);
-    expect(good.parts.reduce((s, p) => s + p.max, 0)).toBe(95);
+    expect(good.parts.reduce((s, p) => s + p.max, 0)).toBe(105);
   });
   it("rischio/rendimento migliore alza la fiducia", () => {
     const up = inputs(wavy, wavy.at(-1)!);
@@ -64,5 +64,28 @@ describe("combinazione con Claude", () => {
   });
   it("senza indicatori usa la fiducia di Claude senza inventare", () => {
     expect(blendConfidence(72, { score: 0, usable: false, parts: [] }, false).confidence).toBe(72);
+  });
+});
+
+describe("multi-timeframe", () => {
+  it("allineamento pesato dei timeframe", async () => {
+    const { mtfSummary } = await import("@/lib/indicators");
+    const t = (verdict: "buy" | "sell" | "neutral") => ({ signals: { verdict } }) as never;
+    const m = (a: "buy" | "sell" | "neutral", b: "buy" | "sell" | "neutral", c: "buy" | "sell" | "neutral") => ({ asOf: "x", frames: { "30m": t(a), "1h": t(b), "4h": t(c) } });
+    expect(mtfSummary(m("buy", "buy", "buy")).alignment).toBe(1);
+    expect(mtfSummary(m("sell", "sell", "sell")).alignment).toBe(-1);
+    expect(mtfSummary(m("buy", "sell", "neutral")).alignment).toBeCloseTo(-0.5 / 4.5);
+    expect(mtfSummary(null).alignment).toBeNull();
+  });
+  it("timeframe concordi alzano la fiducia di un acquisto, discordi la abbassano", () => {
+    const up = inputs(wavy, wavy.at(-1)!);
+    const price = wavy.at(-1)!;
+    const tf = (v: "buy" | "sell") => ({ asOf: "x", frames: { "30m": { signals: { verdict: v } }, "1h": { signals: { verdict: v } }, "4h": { signals: { verdict: v } } } }) as never;
+    const base = { side: "buy" as const, price, target: price * 1.1, stop: price * 0.97, ...up };
+    const hi = quantConfidence({ ...base, mtf: tf("buy") });
+    const lo = quantConfidence({ ...base, mtf: tf("sell") });
+    expect(hi.score).toBeGreaterThan(lo.score + 8);
+    expect(hi.parts.find((p) => p.label.startsWith("timeframe"))?.pts).toBe(10);
+    expect(lo.parts.find((p) => p.label.startsWith("timeframe"))?.pts).toBe(0);
   });
 });

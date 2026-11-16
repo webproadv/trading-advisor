@@ -3,7 +3,7 @@ import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
 import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
 import { blendConfidence, quantConfidence } from "./confidence";
-import { analyze, favorableBuy, favorableSell, techPanel, type Analysis, type Tech } from "./indicators";
+import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, techPanel, type Analysis, type Mtf, type Tech } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import { parseChatIds, type Button, type TelegramLike } from "./telegram";
@@ -25,6 +25,8 @@ async function fxOf(d: Deps, symbol: string): Promise<number> {
 }
 
 const SUGGESTION_TTL_H = 20;
+const INTRADAY_TTL_H = 6;          // le idee intraday scadono in giornata
+const INTRADAY_MIN_UPSIDE_PCT = 1.5; // margine minimo di acquisto per le idee intraday
 
 // ------------------------------------------------------------------ utilita'
 async function once(d: Deps, key: string): Promise<boolean> {
@@ -59,8 +61,30 @@ export function dropIncomplete(candles: Candle[], intervalSec: number, now: Date
 // ------------------------------------------------------------------ analisi tecnica live
 const TECH_TTL_MS = 14 * 60_000;
 
-/** Scarica le candele giornaliere, calcola analisi di trend e pannello tecnico con prezzo live, e li salva. */
-export async function refreshTech(d: Deps, symbol: string, instrumentId: number, live: number | null): Promise<{ a: Analysis; tech: Tech | null } | null> {
+/** Scarica le candele a 30 minuti, 1 ora e 4 ore e calcola il pannello tecnico di ciascun timeframe con prezzo live. */
+export async function refreshIntraday(d: Deps, symbol: string, instrumentId: number, live: number | null): Promise<Mtf | null> {
+  const now = d.now();
+  const frames = { "30m": null, "1h": null, "4h": null } as Mtf["frames"];
+  let any = false;
+  for (const f of FRAMES) {
+    try {
+      const raw = await d.etoro.candles(instrumentId, f.interval, 150);
+      const completed = dropIncomplete(raw, f.sec, now);
+      const partial = completed.length < raw.length ? raw[raw.length - 1] : null;
+      const price = live ?? completed[completed.length - 1]?.c ?? null;
+      if (price === null) continue;
+      frames[f.frame] = techPanel(completed, price, partial, now.toISOString());
+      if (frames[f.frame]) any = true;
+    } catch (e) { await d.store.logEvent("mtf_error", { symbol, frame: f.frame, error: (e as Error).message }); }
+  }
+  if (!any) return null;
+  const m: Mtf = { asOf: now.toISOString(), frames };
+  await d.store.kvSet(`mtf:${symbol}`, m);
+  return m;
+}
+
+/** Scarica le candele giornaliere, calcola analisi di trend e pannello tecnico con prezzo live (piu' i timeframe intraday), e li salva. */
+export async function refreshTech(d: Deps, symbol: string, instrumentId: number, live: number | null): Promise<{ a: Analysis; tech: Tech | null; mtf: Mtf | null } | null> {
   const now = d.now();
   const raw = await d.etoro.candles(instrumentId, "OneDay", 130);
   const completed = dropIncomplete(raw, 86400, now);
@@ -70,8 +94,19 @@ export async function refreshTech(d: Deps, symbol: string, instrumentId: number,
   const tech = techPanel(completed, live ?? a.last, partial, now.toISOString());
   await d.store.kvSet(`analysis:${symbol}`, a);
   if (tech) await d.store.kvSet(`tech:${symbol}`, tech);
-  return { a, tech };
+  const mtf = await refreshIntraday(d, symbol, instrumentId, live);
+  return { a, tech, mtf };
 }
+
+const mtfRow = (m: Mtf | null): Pick<QuantRow, "mtf" | "mtfAlignment"> => {
+  if (!m) return {};
+  const mtf: NonNullable<QuantRow["mtf"]> = {};
+  for (const f of FRAMES) {
+    const t = m.frames[f.frame];
+    mtf[f.frame] = t ? { verdict: t.signals.verdict, rsi14: t.rsi14, macdHist: t.macdHist, adx: t.adx, stochK: t.stochK, atrPct: t.atrPct } : null;
+  }
+  return { mtf, mtfAlignment: mtfSummary(m).alignment };
+};
 
 const techRow = (t: Tech | null): QuantRow["tech"] => t ? {
   mom10Pct: t.mom10Pct, stochK: t.stochK, stochD: t.stochD, stochRsiK: t.stochRsiK, macdHist: t.macdHist, adx: t.adx, plusDI: t.plusDI,
@@ -151,16 +186,20 @@ export async function proposeIdea(
   if (!rate) { rate = (await d.etoro.rates([id]))[id]; if (rate) c.rates[id] = rate; }
   if (!rate) return { skipped: "prezzo non disponibile" };
   const refs = sources.filter((s) => idea.source_urls.includes(s.url)).slice(0, 4);
-  const expires_at = new Date(c.now.getTime() + SUGGESTION_TTL_H * 3600_000).toISOString();
+  const intraday = idea.horizon === "intraday";
+  const expires_at = new Date(c.now.getTime() + (intraday ? INTRADAY_TTL_H : SUGGESTION_TTL_H) * 3600_000).toISOString();
+  const tag = intraday ? "⏱ INTRADAY (chiusura entro la sessione, solo manuale) · " : "";
+  const confMeta = { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true, horizon: intraday ? "intraday" : "swing" };
 
   if (idea.side === "buy") {
     const price = rate.ask;
     const k = await fxOf(d, symbol);
     const target = idea.target_price ?? price * (1 + settings.take_profit_pct / 100);
     const up = upsidePct(target, price);
-    if (up === null || up < settings.buy_margin_pct) return { skipped: `upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine di acquisto (${settings.buy_margin_pct}%)` };
+    const minUp = intraday ? Math.min(settings.buy_margin_pct, INTRADAY_MIN_UPSIDE_PCT) : settings.buy_margin_pct;
+    if (up === null || up < minUp) return { skipped: `upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine di acquisto (${minUp}%)` };
     if (c.snap.positions.some((p) => p.instrumentId === id)) return { skipped: "gia' in portafoglio" };
-    const stop = idea.stop_price && idea.stop_price < price ? idea.stop_price : price * (1 - settings.stop_loss_pct / 100);
+    const stop = idea.stop_price && idea.stop_price < price ? idea.stop_price : price * (1 - (intraday ? Math.min(settings.stop_loss_pct, 1.5) : settings.stop_loss_pct) / 100);
     const size = sizeBuy({ settings, price: price * k, cash: c.snap.cash, investedToday: c.investedAuto, openCount: c.snap.positions.length });
     // in modalita' consulente proponiamo comunque la dimensione ideale; i limiti bloccano solo l'autopilot
     const cashOnly = c.snap.cash === null ? Infinity : Math.max(0, c.snap.cash * 0.98);
@@ -170,9 +209,9 @@ export async function proposeIdea(
     const created = await d.store.createSuggestion({
       symbol, instrument_id: id, side: "buy", units: round4(amount / (price * k)), amount_usd: amount, price_ref: price,
       target_price: round2(target), stop_price: round2(stop), confidence: bl.confidence,
-      rationale: `${idea.rationale}\n${bl.note}`.trim(), sources: refs, origin, expires_at,
+      rationale: `${tag}${idea.rationale}\n${bl.note}`.trim(), sources: refs, origin, expires_at,
     });
-    await d.store.kvSet(`conf:${created.id}`, { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true });
+    await d.store.kvSet(`conf:${created.id}`, confMeta);
     return { created };
   }
 
@@ -187,9 +226,9 @@ export async function proposeIdea(
   const created = await d.store.createSuggestion({
     symbol, instrument_id: id, side: "sell", units: round4(units), amount_usd: round2(units * price * ks), price_ref: price,
     target_price: idea.target_price, stop_price: idea.stop_price, confidence: bs.confidence,
-    rationale: `${idea.rationale}\n${bs.note}`.trim(), sources: refs, origin, expires_at,
+    rationale: `${tag}${idea.rationale}\n${bs.note}`.trim(), sources: refs, origin, expires_at,
   });
-  await d.store.kvSet(`conf:${created.id}`, { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true });
+  await d.store.kvSet(`conf:${created.id}`, confMeta);
   return { created };
 }
 
@@ -198,8 +237,8 @@ async function confidenceFor(
   d: Deps, symbol: string, side: "buy" | "sell", price: number, target: number | null, stop: number | null,
   idea: RawIdea, settings: Settings, pnlPct: number | null,
 ) {
-  const [analysis, tech] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${symbol}`), d.store.kvGet<Tech>(`tech:${symbol}`)]);
-  const q = quantConfidence({ side, price, target, stop, analysis, tech, pnlPct, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
+  const [analysis, tech, mtf] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${symbol}`), d.store.kvGet<Tech>(`tech:${symbol}`), d.store.kvGet<Mtf>(`mtf:${symbol}`)]);
+  const q = quantConfidence({ side, price, target, stop, analysis, tech, mtf, pnlPct, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
   const ruleOnly = idea.rule === true;
   return blendConfidence(ruleOnly ? null : clamp(idea.confidence, 0, 100), q, ruleOnly);
 }
@@ -436,10 +475,10 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
       const price0 = rates[w.instrument_id]?.ask ?? null;
       const got = await refreshTech(d, w.symbol, w.instrument_id, price0);
       if (!got) return;
-      const { a, tech } = got;
+      const { a, tech, mtf } = got;
       const price = price0 ?? a.last;
       rows.push({ symbol: w.symbol, price, lastClose: a.last, gapPct: (price / a.last - 1) * 100, trend: a.trend, rsi14: a.rsi14,
-        sma20: a.sma20, sma50: a.sma50, mom20Pct: a.mom20Pct, score: a.score, tech: techRow(tech) });
+        sma20: a.sma20, sma50: a.sma50, mom20Pct: a.mom20Pct, score: a.score, tech: techRow(tech), ...mtfRow(mtf) });
     } catch (e) { await d.store.logEvent("scan_symbol_error", { symbol: w.symbol, error: (e as Error).message }); }
   });
   rows.sort((a, b) => b.score - a.score);
@@ -515,6 +554,8 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
       if (await once(d, `autoskip:${s.id}:${day}`)) await d.store.logEvent("auto_skip", { id: s.id, symbol: s.symbol, why });
     };
     if (!r) { await skip("prezzo non disponibile"); continue; }
+    const meta = await d.store.kvGet<{ horizon?: string }>(`conf:${s.id}`);
+    if (meta?.horizon === "intraday") { await skip("idea intraday: solo esecuzione manuale"); continue; }
     if (s.side === "buy") {
       const price = r.ask;
       const k = await fxOf(d, s.symbol);
@@ -603,13 +644,53 @@ export async function refreshSweep(d: Deps, scope: Group): Promise<string[]> {
     const r = rates[x.instrument_id];
     if (!meta || !r) continue;
     const price = x.side === "buy" ? r.ask : r.bid;
-    const [analysis, tech] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${x.symbol}`), d.store.kvGet<Tech>(`tech:${x.symbol}`)]);
-    const q = quantConfidence({ side: x.side, price, target: x.target_price, stop: x.stop_price, analysis, tech, pnlPct: null, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
+    const [analysis, tech, mtf] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${x.symbol}`), d.store.kvGet<Tech>(`tech:${x.symbol}`), d.store.kvGet<Mtf>(`mtf:${x.symbol}`)]);
+    const q = quantConfidence({ side: x.side, price, target: x.target_price, stop: x.stop_price, analysis, tech, mtf, pnlPct: null, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct });
     const bl = blendConfidence(meta.rule ? null : meta.claude, q, meta.rule);
     if (bl.confidence !== x.confidence) { await d.store.updateSuggestion(x.id, { confidence: bl.confidence }); rescored++; }
   }
-  await d.store.kvSet(`refresh:${scope}`, { ts: now.toISOString(), refreshed, rescored });
-  return [`${scope}: ${refreshed} titoli aggiornati, ${rescored} fiducie ricalcolate`];
+  const intra = sess.session === "regular" ? await intradaySignals(d, watch, rates) : 0;
+  await d.store.kvSet(`refresh:${scope}`, { ts: now.toISOString(), refreshed, rescored, intra });
+  return [`${scope}: ${refreshed} titoli aggiornati, ${rescored} fiducie ricalcolate${intra ? `, ${intra} idee intraday` : ""}`];
+}
+
+
+/** Idee intraday da regole: tutti i timeframe 30m/1h/4h allineati (e trend giornaliero non contrario). Solo manuali, una per titolo e direzione al giorno. */
+async function intradaySignals(d: Deps, watch: Array<{ symbol: string; instrument_id: number }>, rates: Record<number, Rate>): Promise<number> {
+  const cands: Array<{ symbol: string; id: number; side: "buy" | "sell"; m: Mtf; a: Analysis | null }> = [];
+  for (const w of watch) {
+    const m = await d.store.kvGet<Mtf>(`mtf:${w.symbol}`);
+    if (!m) continue;
+    const { verdicts, alignment } = mtfSummary(m);
+    const a = await d.store.kvGet<Analysis>(`analysis:${w.symbol}`);
+    if (alignment !== null && alignment >= 0.7 && verdicts["30m"] === "buy" && verdicts["1h"] === "buy" && a?.trend !== "down") cands.push({ symbol: w.symbol, id: w.instrument_id, side: "buy", m, a });
+    else if (alignment !== null && alignment <= -0.7 && verdicts["30m"] === "sell" && verdicts["1h"] === "sell") cands.push({ symbol: w.symbol, id: w.instrument_id, side: "sell", m, a });
+  }
+  if (!cands.length) return 0;
+  const snap = await snapshot(d);
+  const c = await proposeCtx(d, snap, rates);
+  let n = 0;
+  for (const x of cands) {
+    if (x.side === "sell" && !snap.positions.some((p) => p.instrumentId === x.id)) continue;
+    if (x.side === "buy" && snap.positions.some((p) => p.instrumentId === x.id)) continue;
+    if (!(await once(d, `intra:${x.symbol}:${x.side}:${c.day}`))) continue;
+    const r = rates[x.id];
+    if (!r) continue;
+    const h1 = x.m.frames["1h"] ?? x.m.frames["30m"];
+    const atr = h1?.atrPct ?? 1;
+    const px = x.side === "buy" ? r.ask : r.bid;
+    const tgtPct = Math.min(4, Math.max(INTRADAY_MIN_UPSIDE_PCT, atr * 1.5));
+    const stopPct = Math.min(2, Math.max(0.7, atr));
+    const v = mtfSummary(x.m).verdicts;
+    const idea: RawIdea = x.side === "buy"
+      ? { symbol: x.symbol, side: "buy", confidence: 50, rule: true, horizon: "intraday", target_price: px * (1 + tgtPct / 100), stop_price: px * (1 - stopPct / 100), source_urls: [],
+          rationale: `Timeframe allineati al rialzo (30m ${v["30m"]}, 1h ${v["1h"]}, 4h ${v["4h"]}); target ${tgtPct.toFixed(1)}%, stop ${stopPct.toFixed(1)}% su ATR 1h ${atr.toFixed(1)}%. Idea da regole, senza notizie.` }
+      : { symbol: x.symbol, side: "sell", confidence: 50, rule: true, horizon: "intraday", target_price: null, stop_price: null, source_urls: [],
+          rationale: `Timeframe allineati al ribasso (30m ${v["30m"]}, 1h ${v["1h"]}, 4h ${v["4h"]}): valuta l'uscita in giornata. Idea da regole, senza notizie.` };
+    const res = await proposeIdea(d, c, idea, [], "monitor");
+    if (res.created) { n++; await notify(d, suggestionHtml(res.created, "⏱ Opportunità intraday"), buttonsFor(res.created)); }
+  }
+  return n;
 }
 
 // ------------------------------------------------------------------ tick (chiamato ogni 5 minuti)

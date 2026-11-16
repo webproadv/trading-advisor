@@ -257,3 +257,25 @@ export function techPanel(completed: Candle[], live: number, partial: Candle | n
     signals: { buy, sell, neutral: vals.length - buy - sell, verdict, detail },
   };
 }
+
+// ------------------------------------------------------------------ multi-timeframe (30 minuti, 1 ora, 4 ore)
+export type Frame = "30m" | "1h" | "4h";
+export const FRAMES: Array<{ frame: Frame; interval: string; sec: number; weight: number }> = [
+  { frame: "30m", interval: "ThirtyMinutes", sec: 1800, weight: 1 },
+  { frame: "1h", interval: "OneHour", sec: 3600, weight: 1.5 },
+  { frame: "4h", interval: "FourHours", sec: 14400, weight: 2 },
+];
+export interface Mtf { asOf: string; frames: Record<Frame, Tech | null> }
+
+/** Verdetto per timeframe e allineamento pesato (-1 = tutti in vendita, +1 = tutti in acquisto). */
+export function mtfSummary(m: Mtf | null): { verdicts: Record<Frame, Sig | null>; alignment: number | null } {
+  const verdicts = { "30m": null, "1h": null, "4h": null } as Record<Frame, Sig | null>;
+  if (!m) return { verdicts, alignment: null };
+  let num = 0, den = 0;
+  for (const f of FRAMES) {
+    const v = m.frames[f.frame]?.signals.verdict ?? null;
+    verdicts[f.frame] = v;
+    if (v) { num += f.weight * (v === "buy" ? 1 : v === "sell" ? -1 : 0); den += f.weight; }
+  }
+  return { verdicts, alignment: den ? num / den : null };
+}

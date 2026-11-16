@@ -66,3 +66,26 @@ describe("aggiornamento ogni 15 minuti", () => {
     expect(await refreshSweep(d, "EU")).toEqual([]); // nessun titolo europeo in watchlist
   });
 });
+
+describe("timeframe intraday", () => {
+  it("salva 30m/1h/4h, marca le idee intraday e l'autopilot non le esegue", async () => {
+    const { autopilotSweep } = await import("@/lib/engine");
+    const store = new MemoryStore();
+    store.watch.set("AAA", { symbol: "AAA", instrument_id: 1, active: true });
+    let bought = 0;
+    const px = wavy.at(-1)!;
+    const claude = { enabled: true, analyze: async () => ({ summary: "ok", sources: [], ideas: [
+      { symbol: "AAA", side: "buy" as const, confidence: 95, horizon: "intraday" as const, target_price: px * 1.025, stop_price: px * 0.99, rationale: "rottura", source_urls: [] }] }) };
+    const d: Deps = { store, etoro: { ...etoro, openBuy: async () => { bought++; return {}; } } as never, tg, claude, now: () => NOW };
+    await store.saveSettings({ mode: "autopilot", min_confidence: 10 });
+    const r = await runScan(d, "2026-07-14@08:00");
+    expect(await store.kvGet("mtf:AAA")).toBeTruthy();
+    expect(r.created.length).toBe(1);
+    const s = r.created[0];
+    expect(s.rationale).toMatch(/INTRADAY/);
+    expect(new Date(s.expires_at).getTime() - NOW.getTime()).toBeLessThanOrEqual(6 * 3600_000);
+    expect(r.created[0].rationale).toMatch(/timeframe 30m\/1h\/4h/);
+    await autopilotSweep({ ...d, now: () => new Date("2026-07-14T15:00:00Z") });
+    expect(bought).toBe(0);
+  });
+});

@@ -61,3 +61,11 @@ Ogni 15 minuti, durante premarket e sessione regolare (USA e Europa, separatamen
 ## Secondo bot Telegram
 
 Opzionale: `TELEGRAM_BOT_TOKEN_2` + `TELEGRAM_CHAT_ID_2` (anche più ID separati da virgola). Gli avvisi vanno a entrambi i bot; i pulsanti e i comandi del secondo bot arrivano su `/api/telegram/webhook?bot=2`, registrato dal pulsante "Collega / verifica Telegram" nelle Impostazioni (usa lo stesso `TELEGRAM_WEBHOOK_SECRET`).
+
+## Timeframe intraday (30 minuti, 1 ora, 4 ore)
+
+Ad ogni aggiornamento (ogni 15 minuti in orario di mercato) l'app calcola il pannello di 9 indicatori anche su candele a 30 minuti, 1 ora e 4 ore. Il risultato:
+- entra nella fiducia (componente "timeframe 30m/1h/4h", fino a 10 punti: più timeframe concordi con l'idea, più fiducia);
+- viene passato a Claude, che valuta tutti gli orizzonti e può proporre idee `intraday` (target 1,5–4%, stop 0,7–2%, calibrati sull'ATR a 1 ora);
+- genera, senza costi IA, idee intraday da regole quando 30m e 1h sono entrambi concordi e l'allineamento pesato è ≥ 70% (acquisto, con trend giornaliero non ribassista) o ≤ −70% (vendita di titoli in portafoglio): al massimo una per titolo e direzione al giorno;
+- le idee intraday scadono dopo 6 ore, accettano un margine minimo di 1,5% (invece di quello impostato per lo swing) e **non vengono mai eseguite dall'autopilot**: solo approvazione manuale.
