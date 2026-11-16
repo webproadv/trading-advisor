@@ -57,3 +57,7 @@ Ogni 15 minuti, durante premarket e sessione regolare (USA e Europa, separatamen
 ## Più chat Telegram
 
 `TELEGRAM_CHAT_ID` accetta più ID separati da virgola (es. `123456789,987654321`): ogni avviso viene inviato a tutte le chat e tutte possono usare i pulsanti e i comandi (/stato, /idee, /stop, /riprendi). Per un gruppo usa l'ID del gruppo (negativo) dopo aver aggiunto il bot.
+
+## Secondo bot Telegram
+
+Opzionale: `TELEGRAM_BOT_TOKEN_2` + `TELEGRAM_CHAT_ID_2` (anche più ID separati da virgola). Gli avvisi vanno a entrambi i bot; i pulsanti e i comandi del secondo bot arrivano su `/api/telegram/webhook?bot=2`, registrato dal pulsante "Collega / verifica Telegram" nelle Impostazioni (usa lo stesso `TELEGRAM_WEBHOOK_SECRET`).

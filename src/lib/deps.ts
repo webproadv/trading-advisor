@@ -3,7 +3,7 @@ import type { Deps } from "./engine";
 import { EtoroClient } from "./etoro";
 import { usdPer } from "./fx";
 import { SupabaseStore } from "./store";
-import { Telegram } from "./telegram";
+import { Telegram, parseChatIds } from "./telegram";
 
 function need(name: string): string {
   const v = process.env[name];
@@ -18,7 +18,8 @@ export function makeEtoro() {
   return new EtoroClient(need("ETORO_API_KEY"), need("ETORO_USER_KEY"));
 }
 export function makeTelegram() {
-  return new Telegram(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID);
+  const extra = process.env.TELEGRAM_BOT_TOKEN_2 ? [{ token: process.env.TELEGRAM_BOT_TOKEN_2, chatIds: parseChatIds(process.env.TELEGRAM_CHAT_ID_2) }] : [];
+  return new Telegram(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID, fetch, extra);
 }
 export function makeDeps(): Deps {
   const store = makeStore();

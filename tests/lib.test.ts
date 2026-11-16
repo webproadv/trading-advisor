@@ -144,3 +144,20 @@ describe("telegram: piu' chat", () => {
     expect(sent).toEqual(["11", "22"]);
   });
 });
+
+describe("telegram: secondo bot", () => {
+  it("invia con entrambi i bot e risponde ai pulsanti col bot di origine", async () => {
+    const { Telegram } = await import("@/lib/telegram");
+    const calls: string[] = [];
+    const f = (async (u: string, init: RequestInit) => { calls.push(`${u.split("/bot")[1]}|${JSON.parse(String(init.body)).chat_id ?? ""}`); return new Response(JSON.stringify({ ok: true })); }) as unknown as typeof fetch;
+    const tg = new Telegram("T1", "11", f, [{ token: "T2", chatIds: ["22", "33"] }]);
+    await tg.send("x");
+    expect(calls.sort()).toEqual(["T1/sendMessage|11", "T2/sendMessage|22", "T2/sendMessage|33"]);
+    calls.length = 0;
+    await tg.forBot(1).answer("cb", "ok");
+    expect(calls).toEqual(["T2/answerCallbackQuery|"]);
+    calls.length = 0;
+    await tg.setWebhooks("https://a.app/api/telegram/webhook", "s");
+    expect(calls.length).toBe(2);
+  });
+});
