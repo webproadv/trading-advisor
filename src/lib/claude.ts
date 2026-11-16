@@ -4,6 +4,14 @@ import type { SourceRef } from "./types";
 export interface QuantRow {
   symbol: string; price: number; lastClose: number | null; gapPct: number | null;
   trend: string; rsi14: number | null; sma20: number | null; sma50: number | null; mom20Pct: number | null; score: number;
+  /** Indicatori tecnici live (candele giornaliere + prezzo attuale). Sintesi: voti su 9 indicatori. */
+  tech?: {
+    mom10Pct: number | null; stochK: number | null; stochD: number | null; stochRsiK: number | null;
+    macdHist: number | null; adx: number | null; plusDI: number | null; minusDI: number | null;
+    willR: number | null; cci20: number | null; atrPct: number | null;
+    pivot: number | null; r1: number | null; s1: number | null;
+    votes: { buy: number; sell: number; neutral: number; verdict: string };
+  };
 }
 export interface HeldRow { symbol: string; units: number | null; openRate: number; price: number | null; pnlPct: number | null }
 
@@ -42,7 +50,8 @@ export function buildUserPrompt(c: AnalysisContext): string {
     `Limiti dell'investitore: margine minimo di acquisto (upside stimato verso il target) ${c.limits.buyMarginPct}%; take-profit ${c.limits.takeProfitPct}%; stop-loss ${c.limits.stopLossPct}%; importo massimo per operazione ${c.limits.maxPositionUsd} USD.`,
     `Giacenza demo: ${c.cash === null ? "n/d" : c.cash.toFixed(2) + " USD"}.`,
     `Posizioni in portafoglio (held): ${JSON.stringify(c.held)}`,
-    `Watchlist con indicatori tecnici calcolati (prezzo live, gap vs ultima chiusura, trend, RSI, medie, momentum): ${JSON.stringify(c.watchlist)}`,
+    `Watchlist con indicatori tecnici calcolati dal sistema (prezzo live, gap vs ultima chiusura, trend, RSI, medie, momentum, Stocastico, StochRSI, MACD, ADX/DI, Williams %R, CCI, ATR%, pivot classici, voti buy/sell): ${JSON.stringify(c.watchlist)}`,
+    "Usa questi indicatori come base quantitativa: non ricalcolarli e non inventarne altri. Tienine conto per prezzo target e stop (es. ATR% per la volatilita', pivot R1/S1 come livelli), e segnala se sono in contrasto con le notizie.",
     c.allowDiscovery
       ? "Puoi proporre anche titoli FUORI dalla watchlist se trovi opportunita' migliori (es. premarket movers, catalizzatori), purche' liquidi e del mercato indicato sopra."
       : "Proponi SOLO titoli della watchlist o in portafoglio.",

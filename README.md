@@ -29,6 +29,9 @@ Web app (Next.js su Vercel + Supabase) che ti fa da consulente: mostra giacenza 
 - Non ancora supportati: Londra (prezzi in pence) e borse nordiche. Il calendario europeo è semplificato: l'app non opera nei giorni in cui chiude almeno una delle borse supportate.
 - Da verificare con il conto demo: che i titoli europei siano acquistabili e che il simbolo con suffisso venga trovato dalla ricerca eToro.
 
+## Analisi tecnica
+Per ogni titolo in watchlist l'app calcola, su candele giornaliere con il prezzo live: momentum (10 giorni), pivot classici, RSI(14), Stocastico(14,3,3), StochRSI(14), MACD(12,26,9), ADX/DI(14), Williams %R(14), CCI(20) e ATR(14). Il giudizio finale conta i segnali di 9 indicatori; in un trend forte (ADX > 25) i segnali di ipercomprato/ipervenduto contro il trend vengono ignorati. I dati sono nella pagina **Analisi**, entrano nel prompt di Claude e fanno da filtro: un titolo con giudizio "vendita" non viene proposto dalle regole automatiche. Si aggiornano a ogni scansione e circa ogni 30 minuti per i titoli con mercato aperto.
+
 ## Limiti da conoscere
 - Mai provata su servizi reali (eToro, Supabase, Telegram, Anthropic): i 32 test usano simulazioni.
 - Funzioni Vercel Hobby: massimo 60 s; la scansione Claude usa un timeout di 52 s.

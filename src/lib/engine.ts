@@ -2,7 +2,7 @@
 import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
 import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
-import { analyze, favorableBuy, favorableSell, type Analysis } from "./indicators";
+import { analyze, favorableBuy, favorableSell, techPanel, type Analysis, type Tech } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import type { Button, TelegramLike } from "./telegram";
@@ -54,6 +54,29 @@ export function dropIncomplete(candles: Candle[], intervalSec: number, now: Date
   if (last && new Date(last.t).getTime() + intervalSec * 1000 > now.getTime()) return candles.slice(0, -1);
   return candles;
 }
+
+// ------------------------------------------------------------------ analisi tecnica live
+const TECH_TTL_MS = 30 * 60_000;
+
+/** Scarica le candele giornaliere, calcola analisi di trend e pannello tecnico con prezzo live, e li salva. */
+export async function refreshTech(d: Deps, symbol: string, instrumentId: number, live: number | null): Promise<{ a: Analysis; tech: Tech | null } | null> {
+  const now = d.now();
+  const raw = await d.etoro.candles(instrumentId, "OneDay", 130);
+  const completed = dropIncomplete(raw, 86400, now);
+  const partial = completed.length < raw.length ? raw[raw.length - 1] : null;
+  const a = analyze(completed);
+  if (!a) return null;
+  const tech = techPanel(completed, live ?? a.last, partial, now.toISOString());
+  await d.store.kvSet(`analysis:${symbol}`, a);
+  if (tech) await d.store.kvSet(`tech:${symbol}`, tech);
+  return { a, tech };
+}
+
+const techRow = (t: Tech | null): QuantRow["tech"] => t ? {
+  mom10Pct: t.mom10Pct, stochK: t.stochK, stochD: t.stochD, stochRsiK: t.stochRsiK, macdHist: t.macdHist, adx: t.adx, plusDI: t.plusDI,
+  minusDI: t.minusDI, willR: t.willR, cci20: t.cci20, atrPct: t.atrPct, pivot: t.pivots?.p ?? null, r1: t.pivots?.r1 ?? null, s1: t.pivots?.s1 ?? null,
+  votes: { buy: t.signals.buy, sell: t.signals.sell, neutral: t.signals.neutral, verdict: t.signals.verdict },
+} : undefined;
 
 // ------------------------------------------------------------------ portafoglio
 export interface PosView extends Position {
@@ -342,11 +365,17 @@ export async function favorableSweep(d: Deps, snap: Snapshot): Promise<string[]>
   const rates = await d.etoro.rates(watch.map((w) => w.instrument_id));
   const c = await proposeCtx(d, snap, rates);
   for (const w of watch) {
-    const a = await d.store.kvGet<Analysis>(`analysis:${w.symbol}`);
     const r = rates[w.instrument_id];
-    if (!a || !r) continue;
+    if (!r) continue;
+    let tech = await d.store.kvGet<Tech>(`tech:${w.symbol}`);
+    if (!tech || d.now().getTime() - new Date(tech.asOf).getTime() > TECH_TTL_MS) {
+      try { tech = (await refreshTech(d, w.symbol, w.instrument_id, r.ask))?.tech ?? tech; }
+      catch (e) { await d.store.logEvent("tech_refresh_error", { symbol: w.symbol, error: (e as Error).message }); }
+    }
+    const a = await d.store.kvGet<Analysis>(`analysis:${w.symbol}`);
+    if (!a) continue;
     const holding = snap.positions.some((p) => p.instrumentId === w.instrument_id);
-    if (!holding && favorableBuy(a, r.ask) && (await once(d, `fav:${w.symbol}:${c.day}`))) {
+    if (!holding && tech?.signals.verdict !== "sell" && favorableBuy(a, r.ask) && (await once(d, `fav:${w.symbol}:${c.day}`))) {
       const idea: RawIdea = {
         symbol: w.symbol, side: "buy", confidence: 50, target_price: r.ask * (1 + c.settings.take_profit_pct / 100), stop_price: null, source_urls: [],
         rationale: `Segnale tecnico: trend rialzista, ritracciamento vicino alla media a 20 giorni (RSI ${a.rsi14?.toFixed(0)}). Idea generata da regole, non da analisi di notizie.`,
@@ -387,14 +416,13 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   const rows: QuantRow[] = [];
   await mapLimit(watch, 3, async (w) => {
     try {
-      const raw = await d.etoro.candles(w.instrument_id, "OneDay", 130);
-      const candles = dropIncomplete(raw, 86400, now);
-      const a = analyze(candles);
-      if (!a) return;
-      await d.store.kvSet(`analysis:${w.symbol}`, a);
-      const price = rates[w.instrument_id]?.ask ?? a.last;
+      const price0 = rates[w.instrument_id]?.ask ?? null;
+      const got = await refreshTech(d, w.symbol, w.instrument_id, price0);
+      if (!got) return;
+      const { a, tech } = got;
+      const price = price0 ?? a.last;
       rows.push({ symbol: w.symbol, price, lastClose: a.last, gapPct: (price / a.last - 1) * 100, trend: a.trend, rsi14: a.rsi14,
-        sma20: a.sma20, sma50: a.sma50, mom20Pct: a.mom20Pct, score: a.score });
+        sma20: a.sma20, sma50: a.sma50, mom20Pct: a.mom20Pct, score: a.score, tech: techRow(tech) });
     } catch (e) { await d.store.logEvent("scan_symbol_error", { symbol: w.symbol, error: (e as Error).message }); }
   });
   rows.sort((a, b) => b.score - a.score);
@@ -419,7 +447,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
     }
   }
   if (!usedClaude) {
-    for (const r of rows.filter((x) => x.trend === "up" && x.rsi14 !== null && x.rsi14 < 60 && x.score >= 3).slice(0, 3)) {
+    for (const r of rows.filter((x) => x.trend === "up" && x.rsi14 !== null && x.rsi14 < 60 && x.score >= 3 && x.tech?.votes.verdict !== "sell").slice(0, 3)) {
       ideas.push({ symbol: r.symbol, side: "buy", confidence: 50, target_price: r.price * (1 + settings.take_profit_pct / 100), stop_price: null, source_urls: [],
         rationale: `Segnale tecnico (trend rialzista, RSI ${r.rsi14?.toFixed(0)}, momentum 20g ${pct(r.mom20Pct)}). Regola automatica.` });
     }

@@ -15,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav>
             <Link href="/">Portafoglio</Link>
             <Link href="/suggerimenti">Idee</Link>
+            <Link href="/analisi">Analisi</Link>
             <Link href="/impostazioni">Impostazioni</Link>
             <Link href="/log">Registro</Link>
             <LogoutButton />
