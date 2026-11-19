@@ -11,17 +11,37 @@ const n = (v: number | null | undefined, d = 1) => (v === null || v === undefine
 const VERDICT = { buy: "ACQUISTO", sell: "VENDITA", neutral: "NEUTRO" } as const;
 const color = (v: string) => (v === "buy" ? "pos" : v === "sell" ? "neg" : "muted");
 
-export default async function Analisi() {
+const RANK = { buy: 0, neutral: 1, sell: 2 } as const;
+/** Potenzialità di acquisto: giudizio giornaliero (segnali buy-sell su 9) e allineamento 30m/1h/4h, da -100 a +100. */
+function potential(t: Tech | null, m: Mtf | null): number {
+  if (!t) return -Infinity;
+  const al = mtfSummary(m).alignment ?? 0;
+  return ((t.signals.buy - t.signals.sell) / 9) * 60 + al * 40;
+}
+
+export default async function Analisi({ searchParams }: { searchParams: Promise<{ ord?: string }> }) {
+  const { ord } = await searchParams;
+  const byName = ord === "titolo";
   await requireAuth();
   const store = makeStore();
   const settings = await store.getSettings();
   const watch = (await store.listWatchlist()).filter((w) => w.active);
   const units0 = (price: number) => Math.max(0.01, Math.floor((settings.max_position_usd / price) * 100) / 100);
   const rows = await Promise.all(watch.map(async (w) => ({ w, t: await store.kvGet<Tech>(`tech:${w.symbol}`), m: await store.kvGet<Mtf>(`mtf:${w.symbol}`) })));
+  rows.sort((a, b) => {
+    if (byName) return a.w.symbol.localeCompare(b.w.symbol);
+    const ra = a.t ? RANK[a.t.signals.verdict] : 3, rb = b.t ? RANK[b.t.signals.verdict] : 3;
+    return ra - rb || potential(b.t, b.m) - potential(a.t, a.m) || a.w.symbol.localeCompare(b.w.symbol);
+  });
   return (
     <>
       <h1>Analisi tecnica</h1>
       <p className="muted">Indicatori su candele giornaliere con il prezzo live; le colonne 30m, 1h e 4h sono il giudizio sugli stessi indicatori calcolati su quei timeframe. Si aggiorna ogni 15 minuti in orario di mercato. Puoi comprare direttamente da qui (conto demo, a mercato aperto). Il giudizio conta i segnali di 9 indicatori (RSI, Stocastico, StochRSI, MACD, ADX, Williams %R, CCI, Momentum, Pivot).</p>
+      <div className="row" style={{ gap: 8, margin: "10px 0" }}>
+        <span className="muted">Ordina per:</span>
+        <a className={`chip ${byName ? "muted" : "pos"}`} href="/analisi">Potenzialità (acquisto in cima)</a>
+        <a className={`chip ${byName ? "pos" : "muted"}`} href="/analisi?ord=titolo">Titolo (A–Z)</a>
+      </div>
       <div className="scroll only-desk"><table>
         <thead><tr><th>Titolo</th><th>Acquista</th><th>Giudizio</th><th>30m</th><th>1h</th><th>4h</th><th>Prezzo</th><th>RSI</th><th>Stoch K/D</th><th>StochRSI</th><th>MACD ist.</th><th>ADX (+DI/-DI)</th><th>Williams</th><th>CCI</th><th>Mom. 10g</th><th>ATR%</th><th>Pivot S1 / P / R1</th><th>Aggiornato</th></tr></thead>
         <tbody>

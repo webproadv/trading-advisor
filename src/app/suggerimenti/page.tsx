@@ -8,14 +8,24 @@ export const dynamic = "force-dynamic";
 
 const ST: Record<string, string> = { pending: "in attesa", approved: "in coda (mercato chiuso)", rejected: "rifiutata", executed: "eseguita", expired: "scaduta", failed: "fallita" };
 
-export default async function Suggerimenti() {
+export default async function Suggerimenti({ searchParams }: { searchParams: Promise<{ ord?: string }> }) {
   await requireAuth();
+  const { ord } = await searchParams;
+  const byName = ord === "titolo";
   const store = makeStore();
   const [pending, past] = await Promise.all([store.listSuggestions(["pending", "approved"], 50), store.listSuggestions(["executed", "rejected", "expired", "failed"], 30)]);
+  // potenzialità = rialzo atteso (obiettivo vs prezzo) pesato per la fiducia; gli acquisti prima delle vendite
+  const score = (s: (typeof pending)[number]) => (s.side === "buy" ? 1e6 : 0) + (upsidePct(s.target_price, s.price_ref) ?? 0) * (s.confidence / 100) + s.confidence / 1000;
+  pending.sort((a, b) => (byName ? a.symbol.localeCompare(b.symbol) : score(b) - score(a)));
   return (
     <>
       <h1>Idee del consulente</h1>
       <p className="muted">Decidi tu se comprare o vendere e quante azioni: modifica il numero e conferma.</p>
+      <div className="row" style={{ gap: 8, margin: "10px 0" }}>
+        <span className="muted">Ordina per:</span>
+        <a className={`chip ${byName ? "muted" : "pos"}`} href="/suggerimenti">Potenzialità (rialzo × fiducia)</a>
+        <a className={`chip ${byName ? "pos" : "muted"}`} href="/suggerimenti?ord=titolo">Titolo (A–Z)</a>
+      </div>
       {pending.length === 0 && <div className="card muted">Nessuna idea in attesa. Il consulente scansiona il mercato agli orari impostati; puoi anche avviare una ricerca dalla pagina Portafoglio.</div>}
       <div className="sugg">
         {pending.map((s) => {
