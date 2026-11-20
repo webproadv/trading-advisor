@@ -68,7 +68,7 @@ describe("aggiornamento ogni 15 minuti", () => {
 });
 
 describe("timeframe intraday", () => {
-  it("salva 30m/1h/4h, marca le idee intraday e l'autopilot non le esegue", async () => {
+  it("salva 30m/1h/4h, marca le idee intraday e l'autopilot le esegue solo con Supertrend/EMA rialzisti", async () => {
     const { autopilotSweep } = await import("@/lib/engine");
     const store = new MemoryStore();
     store.watch.set("AAA", { symbol: "AAA", instrument_id: 1, active: true });
@@ -85,8 +85,14 @@ describe("timeframe intraday", () => {
     expect(s.rationale).toMatch(/INTRADAY/);
     expect(new Date(s.expires_at).getTime() - NOW.getTime()).toBeLessThanOrEqual(6 * 3600_000);
     expect(r.created[0].rationale).toMatch(/timeframe 30m\/1h\/4h/);
-    await autopilotSweep({ ...d, now: () => new Date("2026-07-14T15:00:00Z") });
-    expect(bought).toBe(0);
+    const { trendCandles } = await import("./fixtures");
+    let mode: "up" | "down" = "down";
+    const d2: Deps = { ...d, etoro: { ...etoro, candles: async () => trendCandles(mode === "up" ? 1 : -1, px), openBuy: async () => { bought++; return {}; } } as never, now: () => new Date("2026-07-14T15:00:00Z") };
+    await autopilotSweep(d2);
+    expect(bought).toBe(0); // trend 10/15/30m ribassista: niente acquisto
+    mode = "up";
+    await autopilotSweep(d2);
+    expect(bought).toBe(1);
   });
 });
 

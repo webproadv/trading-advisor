@@ -161,3 +161,9 @@ export const scopeOfSlot = (slot: string): Group => (slot.endsWith("@EU") ? "EU"
 export function euLabel(date: Date): string {
   return new Intl.DateTimeFormat("it-IT", { timeZone: TZ_EU, weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date) + " ora italiana";
 }
+
+/** La sessione successiva e' domani (non weekend ne' festivo)? Serve per gli acquisti "overnight": mai prima di un fine settimana o di un festivo. */
+export function nextDayTrades(group: Group, date: Date, swiss = false): boolean {
+  const t = new Date(date.getTime() + 24 * 3600_000);
+  return group === "US" ? isTradingDay(etParts(t)) : euSessionOf(t, swiss).tradingDay;
+}

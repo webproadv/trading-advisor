@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { trendCandles } from "./fixtures";
 import { MemoryStore } from "@/lib/memoryStore";
 import { usdPer } from "@/lib/fx";
 import { autopilotSweep, executeSuggestion, snapshot, type Deps } from "@/lib/engine";
@@ -85,7 +86,7 @@ describe("cambio valuta", () => {
 class FakeEtoro {
   cash = 5000; positions: Position[] = []; rateMap: Record<number, Rate> = {}; opened: Array<[number, number]> = []; closed: Array<[string, number | null]> = [];
   async rates(ids: number[]) { const o: Record<number, Rate> = {}; for (const i of ids) if (this.rateMap[i]) o[i] = this.rateMap[i]; return o; }
-  async candles() { return []; }
+  async candles() { return trendCandles(1, 14); }
   async search() { return null; }
   async portfolio(): Promise<Portfolio> { return { cash: this.cash, positions: [...this.positions] }; }
   async openBuy(id: number, amount: number) {

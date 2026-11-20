@@ -3,11 +3,11 @@ import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
 import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
 import { blendConfidence, quantConfidence } from "./confidence";
-import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, techPanel, type Analysis, type Mtf, type Tech } from "./indicators";
+import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, techPanel, trendState, type Analysis, type Mtf, type Tech, type TrendState } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import { parseChatIds, type Button, type TelegramLike } from "./telegram";
-import { autoScanSlots, dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
+import { autoScanSlots, dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, nextDayTrades, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
 import type { Candle, Position, Rate, Settings, SourceRef, Suggestion } from "./types";
 
 export interface Deps {
@@ -27,6 +27,7 @@ async function fxOf(d: Deps, symbol: string): Promise<number> {
 const SUGGESTION_TTL_H = 20;
 const INTRADAY_TTL_H = 6;          // le idee intraday scadono in giornata
 const INTRADAY_MIN_UPSIDE_PCT = 1.5; // margine minimo di acquisto per le idee intraday
+const OVERNIGHT_TTL_H = 1;        // le idee overnight valgono fino alla chiusura
 
 // ------------------------------------------------------------------ utilita'
 async function once(d: Deps, key: string): Promise<boolean> {
@@ -187,16 +188,17 @@ export async function proposeIdea(
   if (!rate) return { skipped: "prezzo non disponibile" };
   const refs = sources.filter((s) => idea.source_urls.includes(s.url)).slice(0, 4);
   const intraday = idea.horizon === "intraday";
-  const expires_at = new Date(c.now.getTime() + (intraday ? INTRADAY_TTL_H : SUGGESTION_TTL_H) * 3600_000).toISOString();
-  const tag = intraday ? "⏱ INTRADAY (chiusura entro la sessione, solo manuale) · " : "";
-  const confMeta = { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true, horizon: intraday ? "intraday" : "swing" };
+  const overnight = idea.horizon === "overnight";
+  const expires_at = new Date(c.now.getTime() + (overnight ? OVERNIGHT_TTL_H : intraday ? INTRADAY_TTL_H : SUGGESTION_TTL_H) * 3600_000).toISOString();
+  const tag = overnight ? "🌙 OVERNIGHT (notizia attesa: acquisto prima della chiusura, uscita all'apertura se in perdita) · " : intraday ? "⏱ INTRADAY (da chiudere entro la sessione) · " : "";
+  const confMeta = { claude: idea.rule ? null : clamp(idea.confidence, 0, 100), rule: idea.rule === true, horizon: overnight ? "overnight" : intraday ? "intraday" : "swing" };
 
   if (idea.side === "buy") {
     const price = rate.ask;
     const k = await fxOf(d, symbol);
     const target = idea.target_price ?? price * (1 + settings.take_profit_pct / 100);
     const up = upsidePct(target, price);
-    const minUp = intraday ? Math.min(settings.buy_margin_pct, INTRADAY_MIN_UPSIDE_PCT) : settings.buy_margin_pct;
+    const minUp = intraday || overnight ? Math.min(settings.buy_margin_pct, INTRADAY_MIN_UPSIDE_PCT) : settings.buy_margin_pct;
     if (up === null || up < minUp) return { skipped: `upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine di acquisto (${minUp}%)` };
     if (c.snap.positions.some((p) => p.instrumentId === id)) return { skipped: "gia' in portafoglio" };
     const stop = idea.stop_price && idea.stop_price < price ? idea.stop_price : price * (1 - (intraday ? Math.min(settings.stop_loss_pct, 1.5) : settings.stop_loss_pct) / 100);
@@ -531,15 +533,7 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
       });
       ideas = res.ideas; summary = res.summary; sources = res.sources; usedClaude = true;
     } catch (e) {
-      const msg = (e as Error).message;
-      await d.store.logEvent("claude_error", { error: msg });
-      // credito Anthropic esaurito o chiave non valida: inutile riprovare ogni 15 minuti, pausa di 1 ora e un solo avviso
-      const billing = /credit balance|billing|invalid x-api-key|authentication/i.test(msg);
-      if (billing) {
-        await d.store.kvSet("claude_pause", { until: new Date(now.getTime() + 60 * 60_000).toISOString() });
-        if (await once(d, `claude_billing:${romeDay(now)}:${Math.floor(now.getTime() / (6 * 3600_000))}`))
-          await notify(d, "⚠️ Analisi Claude sospesa: credito Anthropic esaurito o chiave non valida. Ricarica su console.anthropic.com → Plans & Billing. Intanto l'app usa solo le regole tecniche e riprova ogni ora.");
-      } else await notify(d, `⚠️ Analisi Claude non riuscita (${esc(msg.slice(0, 150))}): uso solo le regole tecniche.`);
+      await onClaudeError(d, e, now);
     }
   }
   if (!usedClaude) {
@@ -575,6 +569,170 @@ export async function runScan(d: Deps, slot: string): Promise<ScanSummary> {
   return { slot, summary, created, skipped, usedClaude };
 }
 
+/** Errore dell'analisi Claude: se e' di credito/chiave sospende le chiamate per 1 ora con un solo avviso, altrimenti avvisa. */
+async function onClaudeError(d: Deps, e: unknown, now: Date) {
+  const msg = (e as Error).message;
+  await d.store.logEvent("claude_error", { error: msg });
+  const billing = /credit balance|billing|invalid x-api-key|authentication/i.test(msg);
+  if (billing) {
+    await d.store.kvSet("claude_pause", { until: new Date(now.getTime() + 60 * 60_000).toISOString() });
+    if (await once(d, `claude_billing:${romeDay(now)}:${Math.floor(now.getTime() / (6 * 3600_000))}`))
+      await notify(d, "⚠️ Analisi Claude sospesa: credito Anthropic esaurito o chiave non valida. Ricarica su console.anthropic.com → Plans & Billing. Intanto l'app usa solo le regole tecniche e riprova ogni ora.");
+  } else await notify(d, `⚠️ Analisi Claude non riuscita (${esc(msg.slice(0, 150))}): uso solo le regole tecniche.`);
+}
+
+// ------------------------------------------------------------------ filtri di trend intraday (Supertrend + EMA 9/50)
+const ENTRY_FRAMES = [
+  { frame: "10m", interval: "TenMinutes", sec: 600 }, { frame: "15m", interval: "FifteenMinutes", sec: 900 }, { frame: "30m", interval: "ThirtyMinutes", sec: 1800 },
+];
+const EXIT_FRAMES = [
+  { frame: "1m", interval: "OneMinute", sec: 60 }, { frame: "5m", interval: "FiveMinutes", sec: 300 }, { frame: "10m", interval: "TenMinutes", sec: 600 },
+];
+
+async function trendStates(d: Deps, symbol: string, id: number, live: number, frames: typeof ENTRY_FRAMES): Promise<Array<{ frame: string; st: TrendState | null }>> {
+  const now = d.now();
+  return Promise.all(frames.map(async (f) => {
+    try {
+      const raw = await d.etoro.candles(id, f.interval, 150);
+      return { frame: f.frame, st: trendState(dropIncomplete(raw, f.sec, now), live, now.toISOString()) };
+    } catch (e) {
+      await d.store.logEvent("trend_error", { symbol, frame: f.frame, error: (e as Error).message });
+      return { frame: f.frame, st: null };
+    }
+  }));
+}
+
+const trendText = (r: Array<{ frame: string; st: TrendState | null }>) =>
+  r.map((x) => `${x.frame} ${x.st ? `ST${x.st.supertrend === "up" ? "▲" : "▼"} EMA${x.st.emaTrend === "up" ? "▲" : "▼"}` : "n/d"}`).join(", ");
+
+/** Prima di comprare: Supertrend ed EMA 9/50 devono essere rialzisti (e nessun giudizio di vendita) su 10, 15 e 30 minuti. Senza dati non si compra. */
+export async function entryTrendCheck(d: Deps, symbol: string, id: number, live: number): Promise<{ ok: boolean; why: string }> {
+  const r = await trendStates(d, symbol, id, live, ENTRY_FRAMES);
+  return { ok: r.every((x) => x.st?.bullish === true), why: trendText(r) };
+}
+
+interface OvernightTag { instrumentId: number; symbol: string; day: string; amount: number }
+
+// ------------------------------------------------------------------ guardia ogni minuto (solo autopilot)
+/**
+ * Controllo leggero delle posizioni aperte, chiamato ogni minuto da pg_cron:
+ *  1) acquisti "overnight": alla prima sessione successiva, se la posizione e' in perdita si vende subito;
+ *  2) soglie di perdita/guadagno (stop-loss);
+ *  3) con profitto >= soglia ($) si chiude se il trend e' ribassista (Supertrend, EMA 9/50, indicatori) su 1, 5 e 10 minuti.
+ */
+export async function guardPositions(d: Deps): Promise<string[]> {
+  const settings = await d.store.getSettings();
+  if (settings.mode !== "autopilot" || settings.kill_switch) return [];
+  const now = d.now();
+  const lock = await d.store.kvGet<{ ts: string }>("guard_lock");
+  if (lock && now.getTime() - new Date(lock.ts).getTime() < 50_000) return [];
+  const out: string[] = [];
+  await d.store.kvSet("guard_lock", { ts: now.toISOString() });
+  try {
+    let snap = await snapshot(d);
+    if (!snap.positions.some((p) => p.bid !== null && isRegularFor(p.symbol, now))) return out;
+
+    // 1) overnight: decisione alla prima sessione dopo l'acquisto
+    const tags = (await d.store.kvGet<OvernightTag[]>("overnight")) ?? [];
+    if (tags.length) {
+      const keep: OvernightTag[] = [];
+      for (const t of tags) {
+        const p = snap.positions.find((x) => x.instrumentId === t.instrumentId);
+        if (!p) continue; // posizione chiusa nel frattempo
+        const sess = sessionFor(t.symbol, now);
+        if (sess.session !== "regular" || sess.day <= t.day) { keep.push(t); continue; }
+        if (p.pnl !== null && p.pnl < 0) {
+          try {
+            const msg = await closeSymbol(d, p.instrumentId, null, "autopilot", "apertura in perdita dopo l'acquisto overnight");
+            out.push(msg); await d.store.logEvent("auto_exit", { msg });
+            await notify(d, `🤖 Autopilot — 🌅 ${esc(msg)}`);
+          } catch (e) { keep.push(t); await d.store.logEvent("exit_error", { symbol: t.symbol, error: (e as Error).message }); }
+        } else await notify(d, `🌅 ${esc(t.symbol)}: apertura in guadagno dopo l'acquisto overnight (P/L ${usd(p.pnl)}). Da ora vale la gestione normale.`);
+      }
+      await d.store.kvSet("overnight", keep);
+      if (out.length) snap = await snapshot(d);
+    }
+
+    // 2) soglie di perdita / guadagno
+    const m = await monitorPositions(d, snap);
+    if (m.length) { out.push(...m); snap = await snapshot(d); }
+
+    // 3) uscita su trend ribassista a 1/5/10 minuti, con profitto minimo
+    const minProfit = settings.trend_exit_min_profit_usd;
+    for (const p of snap.positions) {
+      if (p.bid === null || p.pnl === null || !isRegularFor(p.symbol, now) || p.pnl < minProfit) continue;
+      const r = await trendStates(d, p.symbol, p.instrumentId, p.bid, EXIT_FRAMES);
+      if (!r.every((x) => x.st?.bearish === true)) continue;
+      try {
+        const msg = await closeSymbol(d, p.instrumentId, null, "autopilot", `trend ribassista (${trendText(r)}) con profitto ${usd(p.pnl)}`);
+        out.push(msg); await d.store.logEvent("auto_exit", { msg });
+        await notify(d, `🤖 Autopilot — 📉 ${esc(msg)}`);
+      } catch (e) { await d.store.logEvent("exit_error", { symbol: p.symbol, error: (e as Error).message }); }
+    }
+  } finally {
+    await d.store.kvSet("guard_lock", { ts: new Date(0).toISOString() });
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ catalizzatori: acquisti prima della chiusura su notizie attese
+/** Mercati in finestra per la scansione catalizzatori (circa 20-50 minuti prima della chiusura), solo se domani si negozia. */
+export function catalystScopes(d: Deps, settings: Settings): Group[] {
+  if (settings.max_overnight_usd <= 0 || !d.claude.enabled || !d.claude.catalysts) return [];
+  const now = d.now();
+  const out: Group[] = [];
+  const us = sessionOf(now);
+  if (us.session === "regular" && us.minutes >= 15 * 60 + 10 && us.minutes < 15 * 60 + 40 && nextDayTrades("US", now)) out.push("US");
+  const eu = euSessionOf(now);
+  if (eu.session === "regular" && eu.minutes >= 16 * 60 + 40 && eu.minutes < 17 * 60 + 10 && nextDayTrades("EU", now)) out.push("EU");
+  return out;
+}
+
+export async function runCatalystScan(d: Deps, scope: Group): Promise<string> {
+  const now = d.now();
+  const settings = await d.store.getSettings();
+  if (!d.claude.enabled || !d.claude.catalysts) return "Claude non attivo";
+  const paused = await d.store.kvGet<{ until: string }>("claude_pause");
+  if (paused && new Date(paused.until).getTime() > now.getTime()) return "Claude in pausa";
+  const watch = (await d.store.listWatchlist()).filter((w) => w.active && marketOf(w.symbol).group === scope);
+  const snap = await snapshot(d);
+  const ids = [...new Set([...watch.map((w) => w.instrument_id), ...snap.positions.map((p) => p.instrumentId)])];
+  const rates = ids.length ? await d.etoro.rates(ids) : {};
+  const rows: QuantRow[] = [];
+  for (const w of watch) {
+    const [a, tech, mtf] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${w.symbol}`), d.store.kvGet<Tech>(`tech:${w.symbol}`), d.store.kvGet<Mtf>(`mtf:${w.symbol}`)]);
+    if (!a) continue;
+    const price = rates[w.instrument_id]?.ask ?? a.last;
+    rows.push({ symbol: w.symbol, price, lastClose: a.last, gapPct: (price / a.last - 1) * 100, trend: a.trend, rsi14: a.rsi14, sma20: a.sma20, sma50: a.sma50,
+      mom20Pct: a.mom20Pct, score: a.score, tech: techRow(tech), ...mtfRow(mtf) });
+  }
+  const held: HeldRow[] = snap.positions.filter((p) => marketOf(p.symbol).group === scope).map((p) => ({ symbol: p.symbol, units: p.unitsEff, openRate: p.openRate, price: p.bid, pnlPct: p.pnlPct }));
+  let res;
+  try {
+    res = await d.claude.catalysts!({
+      nowIso: now.toISOString(), scope, session: "regular", premarket: false, allowDiscovery: false,
+      limits: { buyMarginPct: settings.buy_margin_pct, takeProfitPct: settings.take_profit_pct, stopLossPct: settings.stop_loss_pct, maxPositionUsd: settings.max_position_usd },
+      cash: snap.cash, held, watchlist: rows, nextSession: new Date(now.getTime() + 24 * 3600_000).toISOString().slice(0, 10),
+    });
+  } catch (e) { await onClaudeError(d, e, now); return "analisi non riuscita"; }
+
+  const c = await proposeCtx(d, snap, rates);
+  const created: Suggestion[] = [];
+  const skipped: Array<{ symbol: string; reason: string }> = [];
+  for (const idea of res.ideas.filter((i) => i.side === "buy")) {
+    try {
+      const r = await proposeIdea(d, c, { ...idea, horizon: "overnight" }, res.sources, "scan");
+      if (r.created) { created.push(r.created); c.pending.push(r.created); } else skipped.push({ symbol: idea.symbol, reason: r.skipped ?? "scartata" });
+    } catch (e) { skipped.push({ symbol: idea.symbol, reason: (e as Error).message }); }
+  }
+  await d.store.logEvent("catalyst_scan", { scope, created: created.map((s) => s.symbol), skipped, summary: res.summary });
+  if (created.length) {
+    await notify(d, `🌙 Catalizzatori ${scope === "EU" ? "Europa" : "USA"}${res.summary ? `\n${esc(res.summary)}` : ""}\n${created.length} idee overnight (acquisto prima della chiusura).`);
+    for (const s of created) await notify(d, suggestionHtml(s), buttonsFor(s));
+  }
+  return `${created.length} idee overnight`;
+}
+
 // ------------------------------------------------------------------ autopilot
 export async function autopilotSweep(d: Deps): Promise<string[]> {
   const settings = await d.store.getSettings();
@@ -595,21 +753,39 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
     };
     if (!r) { await skip("prezzo non disponibile"); continue; }
     const meta = await d.store.kvGet<{ horizon?: string }>(`conf:${s.id}`);
-    if (meta?.horizon === "intraday") { await skip("idea intraday: solo esecuzione manuale"); continue; }
+    const overnight = meta?.horizon === "overnight";
+    const shortTerm = overnight || meta?.horizon === "intraday";
     if (s.side === "buy") {
       const price = r.ask;
       const k = await fxOf(d, s.symbol);
       if (s.confidence < settings.min_confidence) { await skip(`fiducia ${s.confidence} < ${settings.min_confidence}`); continue; }
       if (Math.abs(price / s.price_ref - 1) > 0.03) { await skip("prezzo cambiato oltre il 3% dal suggerimento"); continue; }
       const up = upsidePct(s.target_price, price);
-      if (up === null || up < settings.buy_margin_pct) { await skip(`upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine`); continue; }
+      const minUp = shortTerm ? Math.min(settings.buy_margin_pct, INTRADAY_MIN_UPSIDE_PCT) : settings.buy_margin_pct;
+      if (up === null || up < minUp) { await skip(`upside ${up === null ? "n/d" : up.toFixed(1) + "%"} sotto il margine`); continue; }
       if (snap.positions.some((p) => p.instrumentId === s.instrument_id)) { await skip("gia' in portafoglio"); continue; }
+      if (overnight) {
+        // acquisto prima della chiusura su notizia attesa: mai prima di un fine settimana o di un festivo, con tetto di esposizione
+        const m = marketOf(s.symbol);
+        if (!nextDayTrades(m.group, now, m.currency === "CHF")) { await skip("overnight: la sessione successiva non e' domani (weekend/festivo)"); continue; }
+        const tags = (await d.store.kvGet<OvernightTag[]>("overnight")) ?? [];
+        const exposed = tags.reduce((a, t) => a + t.amount, 0);
+        if (settings.max_overnight_usd <= 0 || exposed + Math.min(settings.max_position_usd, s.amount_usd) > settings.max_overnight_usd) { await skip("tetto di esposizione overnight raggiunto"); continue; }
+      } else {
+        const gate = await entryTrendCheck(d, s.symbol, s.instrument_id, price);
+        if (!gate.ok) { await skip(`trend 10/15/30m non rialzista (${gate.why})`); continue; }
+      }
       const size = sizeBuy({ settings, price: price * k, cash: snap.cash, investedToday: await d.store.investedToday(day, "autopilot"), openCount: snap.positions.length });
       if (size.reasons.length) { await skip(size.reasons.join("; ")); continue; }
       const amount = Math.min(size.amount, s.amount_usd);
       if (amount < MIN_ORDER_USD) { await skip("importo sotto il minimo"); continue; }
       const res = await executeSuggestion(d, s.id, { by: "autopilot", amountUsd: amount });
       out.push(`${s.symbol}: ${res.message}`);
+      if (res.ok && overnight) {
+        const tags = (await d.store.kvGet<OvernightTag[]>("overnight")) ?? [];
+        tags.push({ instrumentId: s.instrument_id, symbol: s.symbol, day: sessionFor(s.symbol, now).day, amount });
+        await d.store.kvSet("overnight", tags);
+      }
       if (res.ok) snap.positions.push({ positionId: "tmp", instrumentId: s.instrument_id, openRate: price, amount, units: null, isBuy: true, symbol: s.symbol, bid: price, unitsEff: null, value: amount, pnl: 0, pnlPct: 0 });
     } else if (settings.auto_follow_sell_ideas || s.origin === "monitor") {
       if (s.confidence < settings.min_confidence) { await skip(`fiducia ${s.confidence} < ${settings.min_confidence}`); continue; }
@@ -769,13 +945,25 @@ export async function tick(d: Deps): Promise<TickResult> {
         const s = snap;
         await guard("monitor", () => monitorPositions(d, s));
         await guard("favorevoli", () => favorableSweep(d, s));
+        await guard("guardia", () => guardPositions(d));
       }
       await guard("coda", () => executeApprovedQueue(d));
       await guard("autopilot", () => autopilotSweep(d));
     }
 
     // scansione con Claude: ogni N minuti (default 15) oppure agli orari fissi. Una sola scansione per tick (la prossima al giro successivo).
-    const slots = settings.scan_interval_min > 0
+    // scansione catalizzatori prima della chiusura (sostituisce la scansione normale in questo giro: una sola chiamata IA per tick)
+    let catalystRan = false;
+    for (const scope of catalystScopes(d, settings)) {
+      const key = `once:catalyst_try:${scope}:${scope === "EU" ? eu.day : sess.day}`;
+      const tries = (await d.store.kvGet<number>(key)) ?? 0;
+      if (tries >= 2) continue;
+      await d.store.kvSet(key, tries + 1);
+      try { const r = await runCatalystScan(d, scope); did.push(`catalizzatori ${scope}: ${r}`); }
+      catch (e) { await d.store.logEvent("catalyst_error", { scope, error: (e as Error).message }); }
+      catalystRan = true; break;
+    }
+    const slots = catalystRan ? [] : settings.scan_interval_min > 0
       ? autoScanSlots(settings.scan_interval_min, now)
       : [...dueScanSlots(settings.scan_times, now), ...dueScanSlotsEu(settings.scan_times_eu, now)];
     for (const slot of slots) {

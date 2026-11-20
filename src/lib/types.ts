@@ -14,6 +14,8 @@ export interface Settings {
   min_confidence: number;           // fiducia minima (0-100) per l'autopilot
   auto_follow_sell_ideas: boolean;  // l'autopilot vende anche su idee di vendita (non solo soglie)
   start_equity: number;             // capitale di partenza del conto demo (per l'utile/perdita totale)
+  trend_exit_min_profit_usd: number; // con almeno questo profitto ($) chiude se il trend 1/5/10 minuti diventa ribassista
+  max_overnight_usd: number;        // massimo investito in acquisti "overnight" su notizie attese (0 = disattivati)
   scan_interval_min: number;        // scansione automatica con Claude ogni N minuti (0 = solo orari fissi)
   scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa USA
   scan_times_eu: string[];          // orari "HH:MM" (ora italiana), giorni di borsa europei
@@ -26,13 +28,15 @@ export const DEFAULT_SETTINGS: Settings = {
   kill_switch: false,
   max_daily_invest_usd: 300,
   take_profit_pct: 10,
-  stop_loss_pct: 5,
+  stop_loss_pct: 2,
   buy_margin_pct: 8,
   max_position_usd: 150,
   max_open_positions: 5,
   min_confidence: 70,
   auto_follow_sell_ideas: false,
   start_equity: 100000,
+  trend_exit_min_profit_usd: 1,
+  max_overnight_usd: 300,
   scan_interval_min: 15,
   scan_times: ["08:00", "10:00", "14:00"],
   scan_times_eu: ["08:30", "11:00", "15:00"],

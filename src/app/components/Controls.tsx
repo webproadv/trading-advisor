@@ -184,6 +184,8 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       {num("take_profit_pct", "Soglia di guadagno per vendere (%)", "Vendo (o ti avviso) quando la posizione guadagna questa percentuale.")}
       {num("stop_loss_pct", "Soglia di perdita per vendere (%)", "Vendo (o ti avviso) quando la posizione perde questa percentuale. Obbligatoria.")}
       {num("buy_margin_pct", "Margine per comprare (%)", "Compro solo se il guadagno stimato verso il prezzo obiettivo supera questa percentuale.")}
+      {num("trend_exit_min_profit_usd", "Chiudi su trend ribassista da profitto ($)", "Con almeno questo profitto in dollari, l'autopilot chiude la posizione se il trend (Supertrend, EMA 9/50 e indicatori) diventa ribassista su 1, 5 e 10 minuti. Sotto questa soglia vale solo lo stop-loss.", "0.5")}
+      {num("max_overnight_usd", "Massimo overnight ($)", "Importo massimo investito in acquisti prima della chiusura su notizie attese (calendario, risultati, aspettative). 0 = disattivato. Mai prima di weekend e festivi; se all'apertura sono in perdita vengono vendute subito.", "10")}
       {num("start_equity", "Capitale iniziale ($)", "Capitale di partenza del conto demo: serve a calcolare l'utile/perdita totale dall'inizio mostrato sotto il patrimonio.", "1")}
       {num("scan_interval_min", "Cerca opportunità ogni (minuti)", "Scansione automatica con analisi di Claude per USA ed Europa, durante premarket e orari di borsa (USA dalle 08:00 ET, Europa dalle 08:00 ora italiana). 0 = solo agli orari fissi qui sotto. Ogni scansione usa l'IA: 15 minuti = circa 70 analisi al giorno.", "1")}
       {num("min_confidence", "Fiducia minima per l'autopilot (0-100)", "Le idee con fiducia inferiore restano in attesa della tua approvazione.", "1")}

@@ -81,3 +81,10 @@ Impostazione "Cerca opportunità ogni (minuti)" (default 15, 0 = solo orari fiss
 ## Credito Anthropic esaurito
 
 Se l'API Anthropic risponde con errore di credito/chiave (`credit balance is too low`, `invalid x-api-key`), l'analisi Claude viene sospesa per 1 ora (`claude_pause` in kv) e viene inviato un solo avviso Telegram ogni 6 ore. Nel frattempo l'app usa solo le regole tecniche (confidenza massima 65, quindi l'autopilot non acquista). Ricarica il credito su console.anthropic.com → Plans & Billing. Per ridurre i costi aumenta `scan_interval_min` (30/60) nelle Impostazioni.
+
+## Autopilot: trend intraday e acquisti su notizie
+
+- **Ingresso**: prima di ogni acquisto l'autopilot controlla che Supertrend (ATR 10, x3), EMA 9 sopra EMA 50 e il giudizio degli indicatori (nessun "vendi") siano rialzisti su **10, 15 e 30 minuti**. Se manca anche un solo dato, non compra. Le idee intraday ora possono essere eseguite dall'autopilot (con questo filtro).
+- **Uscita**: oltre allo stop-loss (default 2%), con profitto di almeno `trend_exit_min_profit_usd` (default 1$) l'autopilot chiude se il trend e' ribassista (Supertrend giu', EMA 9 sotto EMA 50, nessun "compra") su **1, 5 e 10 minuti insieme**. Sotto quella soglia di profitto vale solo lo stop-loss.
+- **Guardia ogni minuto**: `/api/cron/guard`, chiamata da pg_cron ogni minuto nelle ore di borsa (job `trading-advisor-guard`); fa solo stop-loss, uscita su trend e controllo overnight, senza IA. Se il job manca, gli stessi controlli girano comunque ogni 5 minuti nel tick.
+- **Overnight (notizie attese)**: circa 20-50 minuti prima della chiusura di USA ed Europa una scansione Claude (fino a 4 ricerche web) cerca nel calendario dei risultati e delle notizie i titoli con catalizzatore positivo molto probabile per la sessione successiva. L'autopilot li compra anche se il titolo sta scendendo (senza filtro di trend), entro `max_overnight_usd` e **mai prima di weekend o festivi**. Alla prima sessione successiva, se la posizione e' in perdita viene venduta subito; se e' in guadagno resta con la gestione normale.

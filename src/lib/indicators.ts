@@ -279,3 +279,57 @@ export function mtfSummary(m: Mtf | null): { verdicts: Record<Frame, Sig | null>
   }
   return { verdicts, alignment: den ? num / den : null };
 }
+
+// ------------------------------------------------------------------ Supertrend ed EMA 9/50 (filtri di ingresso e di uscita intraday)
+export interface SupertrendResult { dir: "up" | "down"; line: number }
+
+/** Supertrend classico (ATR di Wilder a n periodi, moltiplicatore m). Restituisce la direzione sull'ultima candela. */
+export function supertrendOf(cs: Candle[], n = 10, mult = 3): SupertrendResult | null {
+  if (cs.length < n + 2) return null;
+  const tr: number[] = [];
+  for (let i = 1; i < cs.length; i++) tr.push(Math.max(cs[i].h - cs[i].l, Math.abs(cs[i].h - cs[i - 1].c), Math.abs(cs[i].l - cs[i - 1].c)));
+  // atr[i] corrisponde alla candela i (i >= n)
+  const atr: Array<number | null> = new Array(cs.length).fill(null);
+  let a = tr.slice(0, n).reduce((x, y) => x + y, 0) / n;
+  atr[n] = a;
+  for (let i = n + 1; i < cs.length; i++) { a = (a * (n - 1) + tr[i - 1]) / n; atr[i] = a; }
+  let fu = 0, fl = 0, dir: "up" | "down" = "up", init = false;
+  for (let i = n; i < cs.length; i++) {
+    const mid = (cs[i].h + cs[i].l) / 2, A = atr[i] as number;
+    const bu = mid + mult * A, bl = mid - mult * A;
+    if (!init) { fu = bu; fl = bl; dir = cs[i].c >= mid ? "up" : "down"; init = true; continue; }
+    const pc = cs[i - 1].c;
+    const nfu = bu < fu || pc > fu ? bu : fu;
+    const nfl = bl > fl || pc < fl ? bl : fl;
+    if (dir === "up" && cs[i].c < nfl) dir = "down";
+    else if (dir === "down" && cs[i].c > nfu) dir = "up";
+    fu = nfu; fl = nfl;
+  }
+  return { dir, line: dir === "up" ? fl : fu };
+}
+
+export interface TrendState {
+  supertrend: "up" | "down"; ema9: number; ema50: number; emaTrend: "up" | "down"; verdict: Sig | null;
+  /** Rialzista: Supertrend su, EMA9 sopra EMA50 e nessun giudizio di vendita sugli indicatori. */
+  bullish: boolean;
+  /** Ribassista: Supertrend giu', EMA9 sotto EMA50 e nessun giudizio di acquisto sugli indicatori. */
+  bearish: boolean;
+}
+
+/** Stato del trend su un timeframe: candele completate + prezzo live come ultima candela in formazione. */
+export function trendState(completed: Candle[], live: number, asOf: string): TrendState | null {
+  if (completed.length < 60 || !(live > 0)) return null;
+  const prev = completed[completed.length - 1];
+  const cs = [...completed, { t: asOf, o: prev.c, h: Math.max(prev.c, live), l: Math.min(prev.c, live), c: live }];
+  const st = supertrendOf(cs);
+  const cl = cs.map((c) => c.c);
+  const e9 = last(emaSeries(cl, 9)), e50 = last(emaSeries(cl, 50));
+  if (!st || e9 === null || e50 === null) return null;
+  const verdict = techPanel(completed, live, null, asOf)?.signals.verdict ?? null;
+  const emaTrend = e9 > e50 ? "up" : "down";
+  return {
+    supertrend: st.dir, ema9: e9, ema50: e50, emaTrend, verdict,
+    bullish: st.dir === "up" && emaTrend === "up" && verdict !== "sell",
+    bearish: st.dir === "down" && emaTrend === "down" && verdict !== "buy",
+  };
+}

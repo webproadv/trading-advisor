@@ -34,6 +34,7 @@ export default async function Suggerimenti({ searchParams }: { searchParams: Pro
             <div className={`card idea ${s.side}`} key={s.id}>
               <div className="row"><h3 className={s.side === "buy" ? "pos" : "neg"}>{s.side === "buy" ? "▲ COMPRA" : "▼ VENDI"} {s.symbol}</h3>
                 {s.rationale.startsWith("⏱") && <span className="badge warn">intraday</span>}
+                {s.rationale.startsWith("🌙") && <span className="badge warn">overnight</span>}
                 <span className="badge">{ST[s.status]}</span>
                 <span className={`meter ${s.confidence >= 70 ? "hi" : s.confidence < 50 ? "lo" : ""}`} title="Fiducia calcolata da indicatori, timeframe e analisi"><span className="bar"><i style={{ width: `${Math.min(100, Math.max(0, s.confidence))}%` }} /></span>fiducia {s.confidence}/100</span></div>
               <div className="meta">Prezzo di riferimento {fmtPrice(s.symbol, s.price_ref)} · proposta {num(s.units)} azioni (≈ {usd(s.amount_usd)})
