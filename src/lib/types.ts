@@ -16,6 +16,11 @@ export interface Settings {
   start_equity: number;             // capitale di partenza del conto demo (per l'utile/perdita totale)
   trend_exit_min_profit_usd: number; // con almeno questo profitto ($) chiude se il trend 1/5/10 minuti diventa ribassista
   max_overnight_usd: number;        // massimo investito in acquisti "overnight" su notizie attese (0 = disattivati)
+  rotation_enabled: boolean;        // ogni N minuti compra i migliori titoli con giudizio "acquisto" dell'Analisi e li vende al guadagno indicato
+  rotation_count: number;           // quanti titoli per ciclo
+  rotation_interval_min: number;    // ogni quanti minuti si ripete il ciclo
+  rotation_target_pct: number;      // vendita al raggiungimento di questo guadagno (%)
+  rotation_trend_filter: boolean;   // richiede anche Supertrend/EMA rialzisti su 10/15/30 minuti
   scan_interval_min: number;        // scansione automatica con Claude ogni N minuti (0 = solo orari fissi)
   scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa USA
   scan_times_eu: string[];          // orari "HH:MM" (ora italiana), giorni di borsa europei
@@ -37,6 +42,11 @@ export const DEFAULT_SETTINGS: Settings = {
   start_equity: 100000,
   trend_exit_min_profit_usd: 1,
   max_overnight_usd: 300,
+  rotation_enabled: true,
+  rotation_count: 5,
+  rotation_interval_min: 60,
+  rotation_target_pct: 1,
+  rotation_trend_filter: true,
   scan_interval_min: 15,
   scan_times: ["08:00", "10:00", "14:00"],
   scan_times_eu: ["08:30", "11:00", "15:00"],

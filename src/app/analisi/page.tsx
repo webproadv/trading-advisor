@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { makeStore } from "@/lib/deps";
-import { mtfSummary, type Mtf, type Tech } from "@/lib/indicators";
+import { mtfSummary, potentialScore, type Mtf, type Tech } from "@/lib/indicators";
 import { fmtPrice } from "@/lib/format";
 import { marketOf } from "@/lib/time";
 import { BuyBox } from "../components/Controls";
@@ -12,13 +12,6 @@ const VERDICT = { buy: "ACQUISTO", sell: "VENDITA", neutral: "NEUTRO" } as const
 const color = (v: string) => (v === "buy" ? "pos" : v === "sell" ? "neg" : "muted");
 
 const RANK = { buy: 0, neutral: 1, sell: 2 } as const;
-/** Potenzialità di acquisto: giudizio giornaliero (segnali buy-sell su 9) e allineamento 30m/1h/4h, da -100 a +100. */
-function potential(t: Tech | null, m: Mtf | null): number {
-  if (!t) return -Infinity;
-  const al = mtfSummary(m).alignment ?? 0;
-  return ((t.signals.buy - t.signals.sell) / 9) * 60 + al * 40;
-}
-
 export default async function Analisi({ searchParams }: { searchParams: Promise<{ ord?: string }> }) {
   const { ord } = await searchParams;
   const byName = ord === "titolo";
@@ -31,7 +24,7 @@ export default async function Analisi({ searchParams }: { searchParams: Promise<
   rows.sort((a, b) => {
     if (byName) return a.w.symbol.localeCompare(b.w.symbol);
     const ra = a.t ? RANK[a.t.signals.verdict] : 3, rb = b.t ? RANK[b.t.signals.verdict] : 3;
-    return ra - rb || potential(b.t, b.m) - potential(a.t, a.m) || a.w.symbol.localeCompare(b.w.symbol);
+    return ra - rb || potentialScore(b.t, b.m) - potentialScore(a.t, a.m) || a.w.symbol.localeCompare(b.w.symbol);
   });
   return (
     <>

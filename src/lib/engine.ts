@@ -3,7 +3,7 @@ import type { ClaudeLike, HeldRow, QuantRow, RawIdea } from "./claude";
 import type { EtoroLike } from "./etoro";
 import { clamp, esc, fmtPrice, mapLimit, num, pct, round2, round4, usd } from "./format";
 import { blendConfidence, quantConfidence } from "./confidence";
-import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, techPanel, trendState, type Analysis, type Mtf, type Tech, type TrendState } from "./indicators";
+import { FRAMES, analyze, favorableBuy, favorableSell, mtfSummary, potentialScore, techPanel, trendState, type Analysis, type Mtf, type Tech, type TrendState } from "./indicators";
 import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import { parseChatIds, type Button, type TelegramLike } from "./telegram";
@@ -657,6 +657,10 @@ export async function guardPositions(d: Deps): Promise<string[]> {
     const m = await monitorPositions(d, snap);
     if (m.length) { out.push(...m); snap = await snapshot(d); }
 
+    // 2b) rotazione: vendita al +N%
+    const rt = await rotationTakeProfit(d, snap);
+    if (rt.length) { out.push(...rt); snap = await snapshot(d); }
+
     // 3) uscita su trend ribassista a 1/5/10 minuti, con profitto minimo
     const minProfit = settings.trend_exit_min_profit_usd;
     for (const p of snap.positions) {
@@ -672,6 +676,100 @@ export async function guardPositions(d: Deps): Promise<string[]> {
   } finally {
     await d.store.kvSet("guard_lock", { ts: new Date(0).toISOString() });
   }
+  return out;
+}
+
+// ------------------------------------------------------------------ rotazione: i migliori titoli "acquisto" dell'Analisi, venduti al +N%
+interface RotationTag { instrumentId: number; symbol: string; day: string }
+
+/** Titoli con giudizio "acquisto" nella scheda Analisi, in ordine di potenzialita' (lo stesso ordine della pagina). */
+export async function rankedBuys(d: Deps, group?: Group): Promise<Array<{ symbol: string; instrument_id: number; score: number; tech: Tech }>> {
+  const out: Array<{ symbol: string; instrument_id: number; score: number; tech: Tech }> = [];
+  for (const w of (await d.store.listWatchlist()).filter((x) => x.active && (!group || marketOf(x.symbol).group === group))) {
+    const [tech, mtf] = await Promise.all([d.store.kvGet<Tech>(`tech:${w.symbol}`), d.store.kvGet<Mtf>(`mtf:${w.symbol}`)]);
+    if (tech && tech.signals.verdict === "buy") out.push({ symbol: w.symbol, instrument_id: w.instrument_id, score: potentialScore(tech, mtf), tech });
+  }
+  return out.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+}
+
+/**
+ * Ciclo di rotazione (ogni `rotation_interval_min` minuti): tra i titoli con giudizio "acquisto" dell'Analisi sui mercati aperti
+ * compra i primi N per potenzialita' (se non gia' in portafoglio e, se attivo, con trend 10/15/30m rialzista) e avvisa su Telegram.
+ */
+export async function runRotation(d: Deps): Promise<string[]> {
+  const settings = await d.store.getSettings();
+  if (!settings.rotation_enabled || settings.mode !== "autopilot" || settings.kill_switch) return [];
+  const now = d.now();
+  const open = (["US", "EU"] as const).filter((g) => (g === "US" ? sessionOf(now) : euSessionOf(now)).session === "regular");
+  if (!open.length) return [];
+  const bucket = Math.floor(now.getTime() / (settings.rotation_interval_min * 60_000));
+  if (!(await once(d, `rotation:${bucket}`))) return [];
+
+  const ranked = (await rankedBuys(d)).filter((r) => open.includes(marketOf(r.symbol).group));
+  const top = ranked.slice(0, settings.rotation_count);
+  if (!top.length) { await d.store.logEvent("rotation", { bought: [], note: "nessun titolo con giudizio acquisto" }); return []; }
+  const snap = await snapshot(d);
+  const rates = await d.etoro.rates(top.map((t) => t.instrument_id));
+  const day = romeDay(now);
+  const tags = (await d.store.kvGet<RotationTag[]>("rotation")) ?? [];
+  const lines: string[] = [], skipped: string[] = [], bought: string[] = [];
+  let investedToday = await d.store.investedToday(day, "autopilot");
+
+  for (const r of top) {
+    const skip = (why: string) => skipped.push(`${r.symbol}: ${why}`);
+    if (now.getTime() - new Date(r.tech.asOf).getTime() > 45 * 60_000) { skip("dati tecnici non aggiornati"); continue; }
+    if (snap.positions.some((p) => p.instrumentId === r.instrument_id)) { skip("gia' in portafoglio"); continue; }
+    const rate = rates[r.instrument_id];
+    if (!rate) { skip("prezzo non disponibile"); continue; }
+    try {
+      if (settings.rotation_trend_filter) {
+        const gate = await entryTrendCheck(d, r.symbol, r.instrument_id, rate.ask);
+        if (!gate.ok) { skip(`trend 10/15/30m non rialzista (${gate.why})`); continue; }
+      }
+      const k = await fxOf(d, r.symbol);
+      const size = sizeBuy({ settings, price: rate.ask * k, cash: snap.cash, investedToday, openCount: snap.positions.length });
+      if (size.reasons.length) { skip(size.reasons.join("; ")); continue; }
+      const open_ = await d.etoro.openBuy(r.instrument_id, size.amount);
+      const price = open_.price ?? rate.ask;
+      await d.store.addTrade({
+        day, symbol: r.symbol, instrument_id: r.instrument_id, side: "buy", amount_usd: size.amount, units: round4(size.amount / (price * k)), price,
+        position_id: open_.positionId ?? null, origin: "autopilot", suggestion_id: null, note: `rotazione: acquisto, vendita al +${settings.rotation_target_pct}%`,
+      });
+      await rememberSymbol(d, r.instrument_id, r.symbol);
+      tags.push({ instrumentId: r.instrument_id, symbol: r.symbol, day });
+      snap.positions.push({ positionId: open_.positionId ?? "tmp", instrumentId: r.instrument_id, openRate: price, amount: size.amount, units: null, isBuy: true, symbol: r.symbol, bid: rate.bid, unitsEff: null, value: size.amount, pnl: 0, pnlPct: 0 });
+      if (snap.cash !== null) snap.cash -= size.amount;
+      investedToday += size.amount;
+      bought.push(r.symbol);
+      lines.push(`🟢 ${esc(r.symbol)} ${usd(size.amount)} a ${fmtPrice(r.symbol, price)}`);
+    } catch (e) { skip((e as Error).message); await d.store.logEvent("rotation_error", { symbol: r.symbol, error: (e as Error).message }); }
+  }
+  await d.store.kvSet("rotation", tags);
+  await d.store.logEvent("rotation", { bought, skipped });
+  if (lines.length || skipped.length) {
+    await notify(d, `🔁 <b>Rotazione top ${settings.rotation_count}</b> — vendita al +${settings.rotation_target_pct}%\n${lines.length ? `Acquisti:\n${lines.join("\n")}` : "Nessun acquisto."}${skipped.length ? `\nSaltati:\n${skipped.map(esc).join("\n")}` : ""}`);
+  }
+  return bought.map((s) => `rotazione: acquisto ${s}`);
+}
+
+/** Vende le posizioni della rotazione che hanno raggiunto il guadagno obiettivo; elimina i marcatori delle posizioni gia' chiuse. */
+async function rotationTakeProfit(d: Deps, snap: Snapshot): Promise<string[]> {
+  const settings = await d.store.getSettings();
+  const tags = (await d.store.kvGet<RotationTag[]>("rotation")) ?? [];
+  if (!tags.length) return [];
+  const now = d.now();
+  const out: string[] = [], keep: RotationTag[] = [];
+  for (const t of tags) {
+    const p = snap.positions.find((x) => x.instrumentId === t.instrumentId);
+    if (!p) continue;
+    if (p.pnlPct === null || p.pnlPct < settings.rotation_target_pct || !isRegularFor(p.symbol, now)) { keep.push(t); continue; }
+    try {
+      const msg = await closeSymbol(d, p.instrumentId, null, "autopilot", `rotazione: guadagno +${settings.rotation_target_pct}% raggiunto`);
+      out.push(msg); await d.store.logEvent("auto_exit", { msg });
+      await notify(d, `🔁 💰 <b>Venduto</b> ${esc(msg)}`);
+    } catch (e) { keep.push(t); await d.store.logEvent("exit_error", { symbol: p.symbol, error: (e as Error).message }); }
+  }
+  await d.store.kvSet("rotation", keep);
   return out;
 }
 
@@ -946,6 +1044,7 @@ export async function tick(d: Deps): Promise<TickResult> {
         await guard("monitor", () => monitorPositions(d, s));
         await guard("favorevoli", () => favorableSweep(d, s));
         await guard("guardia", () => guardPositions(d));
+        await guard("rotazione", () => runRotation(d));
       }
       await guard("coda", () => executeApprovedQueue(d));
       await guard("autopilot", () => autopilotSweep(d));

@@ -333,3 +333,9 @@ export function trendState(completed: Candle[], live: number, asOf: string): Tre
     bearish: st.dir === "down" && emaTrend === "down" && verdict !== "buy",
   };
 }
+
+/** Potenzialita' di acquisto di un titolo (da -100 a +100): segnali del giudizio giornaliero (circa 60%) e allineamento 30m/1h/4h (circa 40%). */
+export function potentialScore(t: Tech | null, m: Mtf | null): number {
+  if (!t) return -Infinity;
+  return ((t.signals.buy - t.signals.sell) / 9) * 60 + (mtfSummary(m).alignment ?? 0) * 40;
+}

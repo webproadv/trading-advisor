@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryStore } from "@/lib/memoryStore";
-import { autopilotSweep, catalystScopes, guardPositions, runCatalystScan, type Deps } from "@/lib/engine";
+import { autopilotSweep, catalystScopes, guardPositions, runCatalystScan, runRotation, type Deps } from "@/lib/engine";
 import { supertrendOf, trendState } from "@/lib/indicators";
 import type { Position, Portfolio, Rate } from "@/lib/types";
+import type { Tech } from "@/lib/indicators";
 import { trendCandles } from "./fixtures";
 
 const THU = new Date("2026-07-16T19:20:00Z"); // 15:20 ET giovedi': domani si negozia
@@ -19,8 +20,9 @@ class FakeEtoro {
   async openBuy(id: number, amount: number) {
     this.opened.push(id); this.cash -= amount;
     const price = this.rateMap[id].ask;
-    this.positions.push({ positionId: "p1", instrumentId: id, openRate: price, amount, units: amount / price, isBuy: true });
-    return { positionId: "p1", price };
+    const positionId = `p${this.opened.length}`;
+    this.positions.push({ positionId, instrumentId: id, openRate: price, amount, units: amount / price, isBuy: true });
+    return { positionId, price };
   }
   async close(positionId: string | number) { this.closed.push(String(positionId)); this.positions = this.positions.filter((p) => p.positionId !== String(positionId)); }
 }
@@ -117,5 +119,71 @@ describe("acquisti overnight su notizie attese", () => {
     await store.kvSet(`conf:${s.id}`, { horizon: "overnight", claude: 85, rule: false });
     await autopilotSweep(d);
     expect(eto.opened).toEqual([]);
+  });
+});
+
+describe("rotazione: i migliori titoli \"acquisto\" dell'Analisi, venduti al +1%", () => {
+  const NOON = new Date("2026-07-16T15:00:00Z"); // 11:00 ET
+  const tech = (buy: number, verdict: "buy" | "neutral", asOf: Date): Tech => ({ price: 100, asOf: asOf.toISOString(), signals: { buy, sell: 0, neutral: 9 - buy, verdict, detail: {} } } as unknown as Tech);
+  const seed = async (symbols: Array<[string, number, number, "buy" | "neutral"]>) => {
+    for (const [sym, id, buy, verdict] of symbols) {
+      store.watch.set(sym, { symbol: sym, instrument_id: id, active: true });
+      eto.rateMap[id] = { bid: 99.9, ask: 100 };
+      await store.kvSet(`tech:${sym}`, tech(buy, verdict, NOON));
+    }
+  };
+  const sent = () => (d.tg as unknown as FakeTg).sent;
+  beforeEach(async () => {
+    now = NOON;
+    await seed([["A1", 1, 5, "buy"], ["A2", 2, 9, "buy"], ["A3", 3, 7, "buy"], ["A4", 4, 6, "buy"], ["A5", 5, 8, "buy"], ["A6", 6, 4, "buy"], ["A7", 7, 3, "buy"], ["N1", 8, 9, "neutral"]]);
+    store.watch.delete("AAA");
+    store.settings = { ...store.settings, max_daily_invest_usd: 10000, max_position_usd: 600, max_open_positions: 100 };
+  });
+  it("compra i primi 5 per potenzialita' (solo giudizio acquisto), avvisa su Telegram e non ripete nella stessa ora", async () => {
+    await runRotation(d);
+    expect([...eto.opened].sort()).toEqual([1, 2, 3, 4, 5]); // A2,A5,A3,A4,A1 ; esclusi A6, A7 e N1 (neutro)
+    expect(sent().join("\n")).toMatch(/Rotazione top 5[\s\S]*A2[\s\S]*A5/);
+    await runRotation(d);
+    expect(eto.opened.length).toBe(5);
+  });
+  it("vende appena una posizione della rotazione fa +1%, le altre restano", async () => {
+    await runRotation(d);
+    now = new Date(NOON.getTime() + 5 * 60_000);
+    eto.rateMap[2] = { bid: 101.2, ask: 101.3 };
+    await guardPositions(d);
+    expect(eto.closed).toEqual(["p1"]);
+    expect(sent().join("\n")).toMatch(/Venduto/);
+    await guardPositions(d);
+    expect(eto.closed).toEqual(["p1"]);
+  });
+  it("dopo 60 minuti ripete il ciclo e non ricompra i titoli gia' in portafoglio", async () => {
+    await runRotation(d);
+    now = new Date(NOON.getTime() + 61 * 60_000);
+    await store.kvSet("tech:A2", tech(9, "buy", now)); // dati ancora freschi
+    for (const s of ["A1", "A3", "A4", "A5"]) await store.kvSet(`tech:${s}`, tech(5, "buy", now));
+    await runRotation(d);
+    expect(eto.opened.length).toBe(5);
+  });
+  it("rispetta il filtro di trend, il kill switch e la modalita' consulente", async () => {
+    mode = "down";
+    await runRotation(d);
+    expect(eto.opened).toEqual([]);
+    expect(sent().join("\n")).toMatch(/non rialzista/);
+    mode = "up"; now = new Date(NOON.getTime() + 61 * 60_000);
+    store.settings = { ...store.settings, kill_switch: true };
+    await runRotation(d);
+    store.settings = { ...store.settings, kill_switch: false, mode: "advisor" };
+    await runRotation(d);
+    expect(eto.opened).toEqual([]);
+  });
+  it("senza filtro di trend compra anche con trend ribassista; con mercato chiuso non fa nulla", async () => {
+    mode = "down";
+    store.settings = { ...store.settings, rotation_trend_filter: false };
+    now = new Date("2026-07-18T15:00:00Z"); // sabato
+    await runRotation(d);
+    expect(eto.opened).toEqual([]);
+    now = NOON;
+    await runRotation(d);
+    expect(eto.opened.length).toBe(5);
   });
 });
