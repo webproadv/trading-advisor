@@ -706,7 +706,7 @@ export async function runRotation(d: Deps): Promise<string[]> {
   if (!(await once(d, `rotation:${bucket}`))) return [];
 
   const ranked = (await rankedBuys(d)).filter((r) => open.includes(marketOf(r.symbol).group));
-  const top = ranked.slice(0, settings.rotation_count);
+  const top = settings.rotation_count > 0 ? ranked.slice(0, settings.rotation_count) : ranked; // 0 = tutti i titoli con giudizio acquisto
   if (!top.length) { await d.store.logEvent("rotation", { bought: [], note: "nessun titolo con giudizio acquisto" }); return []; }
   const snap = await snapshot(d);
   const rates = await d.etoro.rates(top.map((t) => t.instrument_id));
@@ -747,7 +747,7 @@ export async function runRotation(d: Deps): Promise<string[]> {
   await d.store.kvSet("rotation", tags);
   await d.store.logEvent("rotation", { bought, skipped });
   if (lines.length || skipped.length) {
-    await notify(d, `🔁 <b>Rotazione top ${settings.rotation_count}</b> — vendita al +${settings.rotation_target_pct}%\n${lines.length ? `Acquisti:\n${lines.join("\n")}` : "Nessun acquisto."}${skipped.length ? `\nSaltati:\n${skipped.map(esc).join("\n")}` : ""}`);
+    await notify(d, `🔁 <b>Rotazione ${settings.rotation_count > 0 ? `top ${settings.rotation_count}` : "tutti i titoli in acquisto"}</b> — vendita al +${settings.rotation_target_pct}%\n${lines.length ? `Acquisti:\n${lines.join("\n")}` : "Nessun acquisto."}${skipped.length ? `\nSaltati:\n${skipped.map(esc).join("\n")}` : ""}`);
   }
   return bought.map((s) => `rotazione: acquisto ${s}`);
 }

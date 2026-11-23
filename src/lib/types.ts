@@ -17,7 +17,7 @@ export interface Settings {
   trend_exit_min_profit_usd: number; // con almeno questo profitto ($) chiude se il trend 1/5/10 minuti diventa ribassista
   max_overnight_usd: number;        // massimo investito in acquisti "overnight" su notizie attese (0 = disattivati)
   rotation_enabled: boolean;        // ogni N minuti compra i migliori titoli con giudizio "acquisto" dell'Analisi e li vende al guadagno indicato
-  rotation_count: number;           // quanti titoli per ciclo
+  rotation_count: number;           // quanti titoli per ciclo (0 = tutti quelli con giudizio acquisto)
   rotation_interval_min: number;    // ogni quanti minuti si ripete il ciclo
   rotation_target_pct: number;      // vendita al raggiungimento di questo guadagno (%)
   rotation_trend_filter: boolean;   // richiede anche Supertrend/EMA rialzisti su 10/15/30 minuti
