@@ -1008,6 +1008,16 @@ async function intradaySignals(d: Deps, watch: Array<{ symbol: string; instrumen
 }
 
 // ------------------------------------------------------------------ tick (chiamato ogni 5 minuti)
+/** Patrimonio a inizio giornata (ora italiana): base per il profitto giornaliero. Registrato al primo controllo del giorno. */
+export async function equityOfDay(d: Deps, currentEquity: number | null): Promise<number | null> {
+  const day = romeDay(d.now());
+  const saved = await d.store.kvGet<{ day: string; equity: number }>("equity_open");
+  if (saved && saved.day === day) return saved.equity;
+  if (currentEquity === null) return null;
+  await d.store.kvSet("equity_open", { day, equity: currentEquity });
+  return currentEquity;
+}
+
 export interface TickResult { session: string; did: string[]; skipped?: string }
 
 export async function tick(d: Deps): Promise<TickResult> {
@@ -1026,6 +1036,8 @@ export async function tick(d: Deps): Promise<TickResult> {
     if (sess.calendarStale && (await once(d, `calstale:${sess.day.slice(0, 4)}`)))
       await notify(d, "⚠️ Il calendario delle festivita' di borsa dell'app e' scaduto: aggiornalo in src/lib/time.ts.");
     await expireSuggestions(d);
+    try { const s = await d.store.kvGet<{ day: string }>("equity_open"); if (!s || s.day !== romeDay(now)) await equityOfDay(d, (await snapshot(d)).equity); }
+    catch (e) { await d.store.logEvent("tick_error", { step: "equity_open", error: (e as Error).message }); }
 
     for (const scope of ["US", "EU"] as const) {
       try { const r = await refreshSweep(d, scope); if (r.length) did.push(`aggiornamento ${r[0]}`); }

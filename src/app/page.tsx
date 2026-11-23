@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { makeDeps } from "@/lib/deps";
-import { snapshot, type Snapshot } from "@/lib/engine";
+import { equityOfDay, snapshot, type Snapshot } from "@/lib/engine";
 import { sessionOf, etLabel, euSessionOf } from "@/lib/time";
 import { fmtPrice, num, pct, usd } from "@/lib/format";
 import { CloseButton, KillSwitch, ScanButton } from "./components/Controls";
@@ -29,6 +29,8 @@ export default async function Home() {
   const stale = tickAgeMin === null || tickAgeMin > 15;
 
   const pnlPct = snap && snap.invested > 0 ? (snap.pnl / snap.invested) * 100 : null;
+  const eq0 = await equityOfDay(d, snap?.equity ?? null).catch(() => null);
+  const dayPl = snap?.equity != null && eq0 !== null ? snap.equity - eq0 : null;
   const totalPl = snap?.equity != null && settings.start_equity > 0 ? snap.equity - settings.start_equity : null;
   const tot = (snap?.cash ?? 0) + (snap?.value ?? 0);
   const invPct = tot > 0 ? Math.min(100, ((snap?.value ?? 0) / tot) * 100) : 0;
@@ -44,7 +46,8 @@ export default async function Home() {
       <section className="card hero" aria-label="Riepilogo conto">
         <div className="top">
           <div><div className="label">Patrimonio totale</div><div className="equity">{usd(snap?.equity)}</div>
-            {totalPl !== null && <div className={`totpl ${cls(totalPl)}`}>{usd(totalPl)}</div>}</div>
+            {totalPl !== null && <div className={`totpl ${cls(totalPl)}`}>{usd(totalPl)}</div>}
+            {dayPl !== null && <div className={`daypl ${cls(dayPl)}`}><small>oggi</small> {usd(dayPl)}</div>}</div>
           <div className="plbox">
             <div className="label">Utile / perdita aperto</div>
             <div className={`big ${cls(snap?.pnl ?? null)}`}>{usd(snap?.pnl)}</div>

@@ -241,3 +241,5 @@ td.wrap, .idea .meta, .idea .why, .login small { white-space: normal; }
 
 .hero .totpl { font-size: clamp(16px, 3vw, 22px); font-weight: 700; margin-top: 4px; white-space: nowrap; }
 @media (max-width: 640px) { .hero .totpl { font-size: 16px; } }
+.hero .daypl { font-size: clamp(14px, 2.6vw, 18px); font-weight: 700; margin-top: 2px; white-space: nowrap; }
+.hero .daypl small { font-weight: 500; opacity: .7; margin-right: 4px; }

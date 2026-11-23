@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { makeDeps } from "@/lib/deps";
-import { guardPositions } from "@/lib/engine";
+import { guardPositions, runRotation } from "@/lib/engine";
 import { safeEqual } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,9 @@ export async function POST(req: Request) {
   after(async () => {
     try { await guardPositions(deps); }
     catch (e) { await deps.store.logEvent("guard_fatal", { error: (e as Error).message }).catch(() => undefined); }
+    // La rotazione e' idempotente per fascia oraria (once): qui parte entro un minuto, senza attendere il tick pesante.
+    try { await runRotation(deps); }
+    catch (e) { await deps.store.logEvent("rotation_error", { error: (e as Error).message }).catch(() => undefined); }
   });
   return Response.json({ ok: true }, { status: 202 });
 }
