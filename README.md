@@ -95,3 +95,6 @@ Solo in modalita' autopilot (impostazioni `rotation_*`). Ogni 60 minuti, a merca
 
 ## Revisione pre-acquisto (stile desk di trading)
 Prima di ogni acquisto dell'autopilot (idee e rotazione) Claude esegue, in una sola chiamata senza ricerca web, tre ruoli: rialzista, ribassista e responsabile del rischio, che approva o respinge. Esito in cache 30 minuti per titolo, registrato negli eventi `entry_review` e riportato tra i "Saltati" di Telegram. Se la revisione e' attiva ma Claude non e' disponibile (errore o pausa crediti) non si compra. Disattivabile dalle impostazioni (`entry_review`).
+
+## Tauric (notizie e sintesi AI, solo titoli USA)
+Con la variabile `TAURIC_API_KEY` (chiave da tauric.ai/settings/api-keys, solo lato server) la revisione pre-acquisto riceve, per i titoli USA, il digest AI e gli ultimi 5 articoli del titolo (API `GET /v1/securities/{symbol}/digest` e `GET /v1/news`). Cache 30 minuti, circa 2 richieste dati per titolo; piano standard: 3000 crediti dati al giorno. Senza chiave, o per titoli non USA/non coperti, la revisione prosegue senza questi dati; gli errori sono registrati come `tauric_error`.

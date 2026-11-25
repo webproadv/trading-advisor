@@ -8,12 +8,15 @@ import { MIN_ORDER_USD, exitDecision, sizeBuy, upsidePct } from "./risk";
 import type { Store } from "./store";
 import { parseChatIds, type Button, type TelegramLike } from "./telegram";
 import { autoScanSlots, dueScanSlots, dueScanSlotsEu, etLabel, euLabel, euSessionOf, isPremarketSlot, isRegularFor, marketOf, nextDayTrades, romeDay, scopeOfSlot, sessionFor, sessionOf, type Group } from "./time";
+import type { TauricContext, TauricLike } from "./tauric";
 import type { Candle, Position, Rate, Settings, SourceRef, Suggestion } from "./types";
 
 export interface Deps {
   store: Store; etoro: EtoroLike; tg: TelegramLike; claude: ClaudeLike; now: () => Date;
   /** USD per 1 unita' di valuta (es. EUR). Assente = solo titoli in USD. */
   fx?: (currency: string) => Promise<number>;
+  /** Notizie e sintesi AI di Tauric (solo titoli USA). Assente o senza chiave = ignorato. */
+  tauric?: TauricLike;
 }
 
 /** Quanti USD vale 1 unita' di prezzo del titolo (1 per i titoli USA). */
@@ -611,6 +614,22 @@ export async function entryTrendCheck(d: Deps, symbol: string, id: number, live:
   return { ok: r.every((x) => x.st?.bullish === true), why: trendText(r) };
 }
 
+/** Contesto notizie Tauric per i titoli USA, in cache 30 minuti. Mai bloccante: in caso di errore o titolo non coperto restituisce null. */
+async function tauricContext(d: Deps, symbol: string): Promise<TauricContext | null> {
+  if (!d.tauric?.enabled || marketOf(symbol).group !== "US") return null;
+  const key = `tauric:${symbol}`;
+  const cached = await d.store.kvGet<{ ts: string; ctx: TauricContext | null }>(key);
+  if (cached && d.now().getTime() - new Date(cached.ts).getTime() < 30 * 60_000) return cached.ctx;
+  try {
+    const ctx = await d.tauric.context(symbol);
+    await d.store.kvSet(key, { ts: d.now().toISOString(), ctx });
+    return ctx;
+  } catch (err) {
+    await d.store.logEvent("tauric_error", { symbol, error: (err as Error).message.slice(0, 120) });
+    return null;
+  }
+}
+
 /**
  * Revisione pre-acquisto (stile desk di trading): rialzista, ribassista e responsabile del rischio in una chiamata a Claude.
  * L'esito e' in cache 30 minuti per titolo. Se la revisione e' attiva ma Claude non e' disponibile, non si compra.
@@ -626,9 +645,10 @@ export async function entryReview(d: Deps, settings: Settings, symbol: string, i
     const [analysis, tech, mtf] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${symbol}`), d.store.kvGet<Tech>(`tech:${symbol}`), d.store.kvGet<Mtf>(`mtf:${symbol}`)]);
     const m = marketOf(symbol);
     const eq0 = await equityOfDay(d, snap.equity);
+    const tauric = await tauricContext(d, symbol);
     const res = await d.claude.review({
       symbol, price, scope: m.group === "EU" ? "EU" : "US", session: "regular", kind,
-      data: { analisi: analysis ?? null, tecnico: techRow(tech), timeframe: mtf ? mtfRow(mtf) : null, trend_10_15_30m: trend },
+      data: { analisi: analysis ?? null, tecnico: techRow(tech), timeframe: mtf ? mtfRow(mtf) : null, trend_10_15_30m: trend, notizie_tauric: tauric },
       rules: { stopLossPct: settings.stop_loss_pct, targetPct: settings.rotation_target_pct, dayPnlUsd: snap.equity !== null && eq0 !== null ? snap.equity - eq0 : null, openPositions: snap.positions.length },
     });
     const why = `${res.approve ? "approvato" : "respinto"}: ${res.risk} (rialzista: ${res.bull} | ribassista: ${res.bear})`;

@@ -212,3 +212,16 @@ describe("rotazione: i migliori titoli \"acquisto\" dell'Analisi, venduti al +1%
     expect(eto.opened.length).toBe(5);
   });
 });
+
+import { parseTauric } from "../src/lib/tauric";
+describe("Tauric", () => {
+  it("riassume digest e notizie, null se vuoto", () => {
+    const ctx = parseTauric(
+      { content: { headline: "H", bullets: [{ text: "utili sopra le stime", polarity: "positive", event_type: "earnings" }], watch_items: ["w1"] }, generated_at: "2026-11-25T07:00:00Z" },
+      { data: [{ title: "Titolo", publisher: "cnbc.com", article_time: "2026-11-25T08:00:00Z", annotations: { sentiment: "bullish", impact: "high" } }] },
+    );
+    expect(ctx?.bullets[0]).toEqual({ text: "utili sopra le stime", polarity: "positive", event: "earnings" });
+    expect(ctx?.news[0].impact).toBe("high");
+    expect(parseTauric(null, { data: [] })).toBeNull();
+  });
+});
