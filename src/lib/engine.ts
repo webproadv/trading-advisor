@@ -611,6 +611,37 @@ export async function entryTrendCheck(d: Deps, symbol: string, id: number, live:
   return { ok: r.every((x) => x.st?.bullish === true), why: trendText(r) };
 }
 
+/**
+ * Revisione pre-acquisto (stile desk di trading): rialzista, ribassista e responsabile del rischio in una chiamata a Claude.
+ * L'esito e' in cache 30 minuti per titolo. Se la revisione e' attiva ma Claude non e' disponibile, non si compra.
+ */
+export async function entryReview(d: Deps, settings: Settings, symbol: string, id: number, price: number, kind: "swing" | "intraday" | "overnight", snap: Snapshot, trend: string): Promise<{ ok: boolean; why: string }> {
+  if (!settings.entry_review || !d.claude.review) return { ok: true, why: "" };
+  if (!d.claude.enabled) return { ok: false, why: "revisione non disponibile (Claude non attivo)" };
+  const paused = await d.store.kvGet<{ until: string }>("claude_pause");
+  if (paused && new Date(paused.until).getTime() > d.now().getTime()) return { ok: false, why: "revisione non disponibile (Claude in pausa)" };
+  const cached = await d.store.kvGet<{ ts: string; ok: boolean; why: string }>(`review:${symbol}`);
+  if (cached && d.now().getTime() - new Date(cached.ts).getTime() < 30 * 60_000) return { ok: cached.ok, why: cached.why };
+  try {
+    const [analysis, tech, mtf] = await Promise.all([d.store.kvGet<Analysis>(`analysis:${symbol}`), d.store.kvGet<Tech>(`tech:${symbol}`), d.store.kvGet<Mtf>(`mtf:${symbol}`)]);
+    const m = marketOf(symbol);
+    const eq0 = await equityOfDay(d, snap.equity);
+    const res = await d.claude.review({
+      symbol, price, scope: m.group === "EU" ? "EU" : "US", session: "regular", kind,
+      data: { analisi: analysis ?? null, tecnico: techRow(tech), timeframe: mtf ? mtfRow(mtf) : null, trend_10_15_30m: trend },
+      rules: { stopLossPct: settings.stop_loss_pct, targetPct: settings.rotation_target_pct, dayPnlUsd: snap.equity !== null && eq0 !== null ? snap.equity - eq0 : null, openPositions: snap.positions.length },
+    });
+    const why = `${res.approve ? "approvato" : "respinto"}: ${res.risk} (rialzista: ${res.bull} | ribassista: ${res.bear})`;
+    await d.store.kvSet(`review:${symbol}`, { ts: d.now().toISOString(), ok: res.approve, why });
+    await d.store.logEvent("entry_review", { symbol, approve: res.approve, confidence: res.confidence, bull: res.bull, bear: res.bear, risk: res.risk });
+    return { ok: res.approve, why };
+  } catch (err) {
+    const msg = (err as Error).message;
+    await d.store.logEvent("entry_review_error", { symbol, error: msg });
+    return { ok: false, why: `revisione non riuscita (${msg.slice(0, 80)})` };
+  }
+}
+
 interface OvernightTag { instrumentId: number; symbol: string; day: string; amount: number }
 
 // ------------------------------------------------------------------ guardia ogni minuto (solo autopilot)
@@ -712,6 +743,7 @@ export async function runRotation(d: Deps): Promise<string[]> {
   if (await dailyLossHalt(d, settings, snap)) { await d.store.logEvent("rotation", { bought: [], note: "limite di perdita giornaliera raggiunto" }); return []; }
   const rates = await d.etoro.rates(top.map((t) => t.instrument_id));
   const day = romeDay(now);
+  const startedAt = Date.now();
   const tags = (await d.store.kvGet<RotationTag[]>("rotation")) ?? [];
   const lines: string[] = [], skipped: string[] = [], bought: string[] = [];
   let investedToday = await d.store.investedToday(day, "autopilot");
@@ -730,6 +762,9 @@ export async function runRotation(d: Deps): Promise<string[]> {
       const k = await fxOf(d, r.symbol);
       const size = sizeBuy({ settings, price: rate.ask * k, cash: snap.cash, investedToday, openCount: snap.positions.length });
       if (size.reasons.length) { skip(size.reasons.join("; ")); continue; }
+      if (Date.now() - startedAt > 40_000) { skip("revisione rimandata (tempo esaurito, al prossimo ciclo)"); continue; }
+      const rev = await entryReview(d, settings, r.symbol, r.instrument_id, rate.ask, "intraday", snap, `${r.tech.signals.verdict}`);
+      if (!rev.ok) { skip(`revisione: ${rev.why}`); continue; }
       const open_ = await d.etoro.openBuy(r.instrument_id, size.amount);
       const price = open_.price ?? rate.ask;
       await d.store.addTrade({
@@ -879,6 +914,8 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
       if (size.reasons.length) { await skip(size.reasons.join("; ")); continue; }
       const amount = Math.min(size.amount, s.amount_usd);
       if (amount < MIN_ORDER_USD) { await skip("importo sotto il minimo"); continue; }
+      const rev = await entryReview(d, settings, s.symbol, s.instrument_id, price, overnight ? "overnight" : meta?.horizon === "intraday" ? "intraday" : "swing", snap, "");
+      if (!rev.ok) { await skip(`revisione: ${rev.why}`); continue; }
       const res = await executeSuggestion(d, s.id, { by: "autopilot", amountUsd: amount });
       out.push(`${s.symbol}: ${res.message}`);
       if (res.ok && overnight) {

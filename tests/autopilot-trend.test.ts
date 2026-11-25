@@ -167,6 +167,20 @@ describe("rotazione: i migliori titoli \"acquisto\" dell'Analisi, venduti al +1%
     expect(eto.opened.length).toBe(0);
     expect(sent().filter((m) => /Limite di perdita giornaliera/.test(m)).length).toBe(1);
   });
+  it("la revisione pre-acquisto puo' respingere un titolo e non compra se Claude non risponde", async () => {
+    store.settings = { ...store.settings, entry_review: true };
+    const review = async (c: { symbol: string }) => ({ approve: c.symbol !== "A2", bull: "forte", bear: "debole", risk: "motivo", confidence: 70 });
+    d = { ...d, claude: { ...(d.claude as object), review } as never };
+    await runRotation(d);
+    expect(eto.opened.length).toBe(4);
+    expect(sent().join("\n")).toMatch(/revisione: respinto/);
+  });
+  it("con revisione attiva e Claude in errore non si compra", async () => {
+    store.settings = { ...store.settings, entry_review: true };
+    d = { ...d, claude: { ...(d.claude as object), review: async () => { throw new Error("giu'"); } } as never };
+    await runRotation(d);
+    expect(eto.opened.length).toBe(0);
+  });
   it("dopo 60 minuti ripete il ciclo e non ricompra i titoli gia' in portafoglio", async () => {
     await runRotation(d);
     now = new Date(NOON.getTime() + 61 * 60_000);

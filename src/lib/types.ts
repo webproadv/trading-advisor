@@ -20,6 +20,7 @@ export interface Settings {
   rotation_count: number;           // quanti titoli per ciclo (0 = tutti quelli con giudizio acquisto)
   rotation_interval_min: number;    // ogni quanti minuti si ripete il ciclo
   rotation_target_pct: number;      // vendita al raggiungimento di questo guadagno (%)
+  entry_review: boolean;            // prima di ogni acquisto dell'autopilot, Claude fa un dibattito rialzista/ribassista e un giudizio di rischio che puo' bloccare l'ordine
   min_reward_risk: number;          // rapporto minimo tra guadagno obiettivo e perdita massima (0 = nessun vincolo)
   max_daily_loss_eur: number;       // perdita giornaliera massima (EUR, patrimonio rispetto a inizio giornata): oltre, stop ai nuovi acquisti (0 = disattivo)
   rotation_trend_filter: boolean;   // richiede anche Supertrend/EMA rialzisti su 10/15/30 minuti
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rotation_count: 5,
   rotation_interval_min: 60,
   rotation_target_pct: 4,
+  entry_review: true,
   min_reward_risk: 2,
   max_daily_loss_eur: 1000,
   rotation_trend_filter: true,

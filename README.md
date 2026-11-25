@@ -92,3 +92,6 @@ Se l'API Anthropic risponde con errore di credito/chiave (`credit balance is too
 ## Rotazione: i migliori titoli "acquisto" dell'Analisi
 
 Solo in modalita' autopilot (impostazioni `rotation_*`). Ogni 60 minuti, a mercato aperto, l'autopilot prende i titoli con giudizio ACQUISTO della pagina Analisi (stesso ordine per potenzialita'), sui mercati aperti, e compra i primi 5 che non ha gia' in portafoglio (importo e limiti come per le altre operazioni; di default richiede anche Supertrend/EMA rialzisti su 10/15/30 minuti). Le posizioni della rotazione vengono vendute appena raggiungono +1% (controllo ogni minuto). Telegram avvisa a ogni ciclo (acquisti e titoli saltati con il motivo) e a ogni vendita. Restano attivi stop-loss e uscita su trend ribassista.
+
+## Revisione pre-acquisto (stile desk di trading)
+Prima di ogni acquisto dell'autopilot (idee e rotazione) Claude esegue, in una sola chiamata senza ricerca web, tre ruoli: rialzista, ribassista e responsabile del rischio, che approva o respinge. Esito in cache 30 minuti per titolo, registrato negli eventi `entry_review` e riportato tra i "Saltati" di Telegram. Se la revisione e' attiva ma Claude non e' disponibile (errore o pausa crediti) non si compra. Disattivabile dalle impostazioni (`entry_review`).
