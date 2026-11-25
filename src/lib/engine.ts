@@ -623,6 +623,7 @@ async function tauricContext(d: Deps, symbol: string): Promise<TauricContext | n
   try {
     const ctx = await d.tauric.context(symbol);
     await d.store.kvSet(key, { ts: d.now().toISOString(), ctx });
+    await d.store.logEvent("tauric", { symbol, ok: !!ctx });
     return ctx;
   } catch (err) {
     await d.store.logEvent("tauric_error", { symbol, error: (err as Error).message.slice(0, 120) });
@@ -761,6 +762,8 @@ export async function runRotation(d: Deps): Promise<string[]> {
   if (!top.length) { await d.store.logEvent("rotation", { bought: [], note: "nessun titolo con giudizio acquisto" }); return []; }
   const snap = await snapshot(d);
   if (await dailyLossHalt(d, settings, snap)) { await d.store.logEvent("rotation", { bought: [], note: "limite di perdita giornaliera raggiunto" }); return []; }
+  // Tauric: precarica notizie/tesi dei titoli USA candidati (cache 30 min), cosi' l'uso e' visibile e la revisione e' piu' rapida
+  if (d.tauric?.enabled) for (const t of top.filter((x) => marketOf(x.symbol).group === "US").slice(0, 8)) await tauricContext(d, t.symbol);
   const rates = await d.etoro.rates(top.map((t) => t.instrument_id));
   const day = romeDay(now);
   const startedAt = Date.now();
