@@ -63,6 +63,10 @@ export function validateSettings(s: Settings): string[] {
   }
   if (!(typeof s.max_daily_loss_eur === "number" && s.max_daily_loss_eur >= 0 && s.max_daily_loss_eur <= 1e7)) e.push("perdita giornaliera massima non valida");
   if (!(Number.isInteger(s.scan_interval_min) && (s.scan_interval_min === 0 || (s.scan_interval_min >= 5 && s.scan_interval_min <= 240)))) e.push("intervallo di scansione: 0 oppure tra 5 e 240 minuti");
+  const hm = (v: unknown) => typeof v === "string" && /^([01]?\d|2[0-3]):[0-5]\d$/.test(v);
+  const mins = (v: string) => Number(v.split(":")[0]) * 60 + Number(v.split(":")[1]);
+  if (!hm(s.scan_us_from) || !hm(s.scan_us_to) || !hm(s.scan_eu_from) || !hm(s.scan_eu_to)) e.push("finestre di scansione non valide (HH:MM)");
+  else if (mins(s.scan_us_from) > mins(s.scan_us_to) || mins(s.scan_eu_from) > mins(s.scan_eu_to)) e.push("finestre di scansione: l'ora di inizio deve precedere quella di fine");
   const okTimes = (a: unknown) => Array.isArray(a) && a.every((t) => typeof t === "string" && /^([01]?\d|2[0-3]):[0-5]\d$/.test(t));
   if (!okTimes(s.scan_times) || !okTimes(s.scan_times_eu)) e.push("orari scansione non validi (HH:MM)");
   return e;

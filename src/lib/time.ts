@@ -145,8 +145,25 @@ export function dueScanSlotsEu(times: string[], date: Date, windowMin = 120): st
 }
 
 /** Slot di scansione automatica ogni `interval` minuti: USA da premarket 08:00 ET alla chiusura, Europa da pre-apertura 08:00 alla chiusura. */
-export function autoScanSlots(interval: number, date: Date): string[] {
+const hmToMin = (h: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(h); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+export interface ScanWindows { usFrom: string; usTo: string; euFrom: string; euTo: string } // ora italiana
+
+/**
+ * Scansioni a intervallo fisso. Senza `win` valgono premarket e orari di borsa; con `win` le scansioni girano solo nelle finestre
+ * indicate (ora italiana), nei giorni di borsa del mercato. L'orario di fine e' incluso (fascia che inizia a quell'ora).
+ */
+export function autoScanSlots(interval: number, date: Date, win?: ScanWindows): string[] {
   if (!(interval >= 1)) return [];
+  if (win) {
+    const hh = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const rome = euSessionOf(date), us = sessionOf(date);
+    const bucket = Math.floor(rome.minutes / interval) * interval;
+    const inWin = (from: string, to: string) => { const a = hmToMin(from), b = hmToMin(to); return a !== null && b !== null && bucket >= a && bucket <= b; };
+    const out: string[] = [];
+    if (us.tradingDay && inWin(win.usFrom, win.usTo)) out.push(`${us.day}@${hh(Math.floor(us.minutes / interval) * interval)}`);
+    if (rome.tradingDay && inWin(win.euFrom, win.euTo)) out.push(`${rome.day}@${hh(bucket)}@EU`);
+    return out;
+  }
   const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   const out: string[] = [];
   const us = sessionOf(date);

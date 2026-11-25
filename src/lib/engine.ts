@@ -1155,7 +1155,7 @@ export async function tick(d: Deps): Promise<TickResult> {
       catalystRan = true; break;
     }
     const slots = catalystRan ? [] : settings.scan_interval_min > 0
-      ? autoScanSlots(settings.scan_interval_min, now)
+      ? autoScanSlots(settings.scan_interval_min, now, { usFrom: settings.scan_us_from, usTo: settings.scan_us_to, euFrom: settings.scan_eu_from, euTo: settings.scan_eu_to })
       : [...dueScanSlots(settings.scan_times, now), ...dueScanSlotsEu(settings.scan_times_eu, now)];
     for (const slot of slots) {
       if (!(await once(d, `scan:${slot}`))) continue;

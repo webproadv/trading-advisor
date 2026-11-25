@@ -197,6 +197,10 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       {num("start_equity", "Capitale iniziale ($)", "Capitale di partenza del conto demo: serve a calcolare l'utile/perdita totale dall'inizio mostrato sotto il patrimonio.", "1")}
       {num("scan_interval_min", "Cerca opportunità ogni (minuti)", "Scansione automatica con analisi di Claude per USA ed Europa, durante premarket e orari di borsa (USA dalle 08:00 ET, Europa dalle 08:00 ora italiana). 0 = solo agli orari fissi qui sotto. Ogni scansione usa l'IA: 15 minuti = circa 70 analisi al giorno.", "1")}
       {num("min_confidence", "Fiducia minima per l'autopilot (0-100)", "Le idee con fiducia inferiore restano in attesa della tua approvazione.", "1")}
+      <label>Scansione Europa: dalle (ora italiana)<input type="text" value={String(s.scan_eu_from)} onChange={(e) => set("scan_eu_from", e.target.value)} /></label>
+      <label>Scansione Europa: fino alle<input type="text" value={String(s.scan_eu_to)} onChange={(e) => set("scan_eu_to", e.target.value)} /></label>
+      <label>Scansione USA: dalle (ora italiana)<input type="text" value={String(s.scan_us_from)} onChange={(e) => set("scan_us_from", e.target.value)} /></label>
+      <label>Scansione USA: fino alle<input type="text" value={String(s.scan_us_to)} onChange={(e) => set("scan_us_to", e.target.value)} /></label>
       <label>Orari scansione USA (ora di New York, usati se l'intervallo sopra è 0)<input type="text" value={String(s.scan_times)} onChange={(e) => set("scan_times", e.target.value)} /><small>Giorni di borsa USA. 08:00 ET = premarket (14:00 in Italia). Esempio: 08:00, 10:00, 14:00</small></label>
       <label>Orari scansione Europa (ora italiana, usati se l'intervallo sopra è 0)<input type="text" value={String(s.scan_times_eu)} onChange={(e) => set("scan_times_eu", e.target.value)} /><small>Giorni di borsa europei (apertura 09:00–17:30). 08:30 = pre-apertura. Esempio: 08:30, 11:00, 15:00</small></label>
       <label className="row"><input type="checkbox" checked={!!s.alerts_enabled} onChange={(e) => set("alerts_enabled", e.target.checked)} /> Alert su Telegram attivi</label>

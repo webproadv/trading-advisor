@@ -175,5 +175,14 @@ describe("scansione automatica ogni 15 minuti", () => {
     // sabato: niente
     expect(autoScanSlots(15, new Date("2026-07-18T13:07:00Z"))).toEqual([]);
     expect(autoScanSlots(0, new Date("2026-07-14T13:07:00Z"))).toEqual([]);
+    // finestre in ora italiana: USA 15:30-22:00, Europa 09:00-17:30, ogni 30 minuti
+    const w = { usFrom: "15:30", usTo: "22:00", euFrom: "09:00", euTo: "17:30" };
+    expect(autoScanSlots(30, new Date("2026-07-14T13:40:00Z"), w)).toEqual(["2026-07-14@09:30", "2026-07-14@15:30@EU"]); // 15:40 Roma
+    expect(autoScanSlots(30, new Date("2026-07-14T06:20:00Z"), w)).toEqual([]);                                       // 08:20 Roma: prima delle finestre
+    expect(autoScanSlots(30, new Date("2026-07-14T07:10:00Z"), w)).toEqual(["2026-07-14@09:00@EU"]);                  // 09:10 Roma
+    expect(autoScanSlots(30, new Date("2026-07-14T15:35:00Z"), w)).toEqual(["2026-07-14@11:30", "2026-07-14@17:30@EU"]); // 17:35 Roma: ultima fascia Europa (17:30)
+    expect(autoScanSlots(30, new Date("2026-07-14T20:10:00Z"), w)).toEqual(["2026-07-14@16:00"]);                       // 22:10 Roma: ultima fascia USA 22:00
+    expect(autoScanSlots(30, new Date("2026-07-14T20:40:00Z"), w)).toEqual([]);
+    expect(autoScanSlots(30, new Date("2026-07-18T13:40:00Z"), w)).toEqual([]);                                       // sabato
   });
 });

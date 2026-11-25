@@ -25,6 +25,10 @@ export interface Settings {
   max_daily_loss_eur: number;       // perdita giornaliera massima (EUR, patrimonio rispetto a inizio giornata): oltre, stop ai nuovi acquisti (0 = disattivo)
   rotation_trend_filter: boolean;   // richiede anche Supertrend/EMA rialzisti su 10/15/30 minuti
   scan_interval_min: number;        // scansione automatica con Claude ogni N minuti (0 = solo orari fissi)
+  scan_us_from: string;             // finestra della scansione a intervallo per i titoli USA (ora italiana)
+  scan_us_to: string;
+  scan_eu_from: string;             // finestra per i titoli europei (ora italiana)
+  scan_eu_to: string;
   scan_times: string[];             // orari "HH:MM" (ora di New York), giorni di borsa USA
   scan_times_eu: string[];          // orari "HH:MM" (ora italiana), giorni di borsa europei
   alerts_enabled: boolean;
@@ -54,6 +58,10 @@ export const DEFAULT_SETTINGS: Settings = {
   max_daily_loss_eur: 1000,
   rotation_trend_filter: true,
   scan_interval_min: 15,
+  scan_us_from: "15:30",
+  scan_us_to: "22:00",
+  scan_eu_from: "09:00",
+  scan_eu_to: "17:30",
   scan_times: ["08:00", "10:00", "14:00"],
   scan_times_eu: ["08:30", "11:00", "15:00"],
   alerts_enabled: true,
