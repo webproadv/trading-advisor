@@ -157,11 +157,20 @@ export function autoScanSlots(interval: number, date: Date, win?: ScanWindows): 
   if (win) {
     const hh = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
     const rome = euSessionOf(date), us = sessionOf(date);
-    const bucket = Math.floor(rome.minutes / interval) * interval;
-    const inWin = (from: string, to: string) => { const a = hmToMin(from), b = hmToMin(to); return a !== null && b !== null && bucket >= a && bucket <= b; };
     const out: string[] = [];
-    if (us.tradingDay && inWin(win.usFrom, win.usTo)) out.push(`${us.day}@${hh(Math.floor(us.minutes / interval) * interval)}`);
-    if (rome.tradingDay && inWin(win.euFrom, win.euTo)) out.push(`${rome.day}@${hh(bucket)}@EU`);
+    // fasce regolari ogni `interval` minuti; con intervalli lunghi si aggiungono i bordi della finestra se cadono a meta' ora (es. 15:30, 17:30)
+    const edge = (from: string, to: string) => [hmToMin(from), hmToMin(to)].filter((x): x is number => x !== null && x % interval !== 0 && x % 30 === 0);
+    const check = (from: string, to: string, edges: number[]) => {
+      const a = hmToMin(from), z = hmToMin(to);
+      if (a === null || z === null) return null;
+      const half = Math.floor(rome.minutes / 30) * 30;
+      const b = edges.includes(half) ? half : Math.floor(rome.minutes / interval) * interval; // il bordo a mezz'ora ha la precedenza
+      return b >= a && b <= z ? b : null;
+    };
+    const ub = check(win.usFrom, win.usTo, edge(win.usFrom, win.usTo));
+    if (us.tradingDay && ub !== null) out.push(`${us.day}@${hh(us.minutes - (rome.minutes - ub))}`);
+    const eb = check(win.euFrom, win.euTo, edge(win.euFrom, win.euTo));
+    if (rome.tradingDay && eb !== null) out.push(`${rome.day}@${hh(eb)}@EU`);
     return out;
   }
   const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;

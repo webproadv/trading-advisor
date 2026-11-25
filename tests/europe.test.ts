@@ -184,5 +184,10 @@ describe("scansione automatica ogni 15 minuti", () => {
     expect(autoScanSlots(30, new Date("2026-07-14T20:10:00Z"), w)).toEqual(["2026-07-14@16:00"]);                       // 22:10 Roma: ultima fascia USA 22:00
     expect(autoScanSlots(30, new Date("2026-07-14T20:40:00Z"), w)).toEqual([]);
     expect(autoScanSlots(30, new Date("2026-07-18T13:40:00Z"), w)).toEqual([]);                                       // sabato
+    // intervallo di 60 minuti: ora piena + bordi a mezz'ora (USA 15:30, Europa 17:30)
+    expect(autoScanSlots(60, new Date("2026-07-14T13:40:00Z"), w)).toEqual(["2026-07-14@09:30", "2026-07-14@15:00@EU"]); // 15:40 Roma: bordo USA 15:30 + ora piena Europa
+    expect(autoScanSlots(60, new Date("2026-07-14T14:10:00Z"), w)).toEqual(["2026-07-14@10:00", "2026-07-14@16:00@EU"]); // 16:10 Roma
+    expect(autoScanSlots(60, new Date("2026-07-14T08:40:00Z"), w)).toEqual(["2026-07-14@10:00@EU"]);                    // 10:40 Roma: solo ora piena
+    expect(autoScanSlots(60, new Date("2026-07-14T15:35:00Z"), w)).toEqual(["2026-07-14@11:00", "2026-07-14@17:30@EU"]); // 17:35 Roma: bordo Europa 17:30
   });
 });
