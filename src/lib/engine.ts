@@ -709,6 +709,7 @@ export async function runRotation(d: Deps): Promise<string[]> {
   const top = settings.rotation_count > 0 ? ranked.slice(0, settings.rotation_count) : ranked; // 0 = tutti i titoli con giudizio acquisto
   if (!top.length) { await d.store.logEvent("rotation", { bought: [], note: "nessun titolo con giudizio acquisto" }); return []; }
   const snap = await snapshot(d);
+  if (await dailyLossHalt(d, settings, snap)) { await d.store.logEvent("rotation", { bought: [], note: "limite di perdita giornaliera raggiunto" }); return []; }
   const rates = await d.etoro.rates(top.map((t) => t.instrument_id));
   const day = romeDay(now);
   const tags = (await d.store.kvGet<RotationTag[]>("rotation")) ?? [];
@@ -841,6 +842,7 @@ export async function autopilotSweep(d: Deps): Promise<string[]> {
   const pending = (await d.store.listSuggestions(["pending"], 100)).filter((s) => isRegularFor(s.symbol, now)).sort((a, b) => b.confidence - a.confidence);
   if (!pending.length) return out;
   const snap = await snapshot(d);
+  if (await dailyLossHalt(d, settings, snap)) return out;
   const rates = await d.etoro.rates([...new Set(pending.map((s) => s.instrument_id))]);
 
   for (const s of pending) {
@@ -1016,6 +1018,27 @@ export async function equityOfDay(d: Deps, currentEquity: number | null): Promis
   if (currentEquity === null) return null;
   await d.store.kvSet("equity_open", { day, equity: currentEquity });
   return currentEquity;
+}
+
+/**
+ * Limite di perdita giornaliera: se il patrimonio (realizzato + non realizzato) e' sceso di almeno `max_daily_loss_eur`
+ * rispetto a inizio giornata, i nuovi acquisti dell'autopilot restano bloccati fino al giorno dopo. Le uscite (stop-loss, trend) continuano.
+ */
+export async function dailyLossHalt(d: Deps, settings: Settings, snap: Snapshot): Promise<boolean> {
+  if (!(settings.max_daily_loss_eur > 0) || snap.equity === null || snap.equity === undefined) return false;
+  const eq0 = await equityOfDay(d, snap.equity);
+  if (eq0 === null) return false;
+  let eurUsd = 1.1;
+  try { eurUsd = d.fx ? await d.fx("EUR") : eurUsd; } catch { /* cambio non disponibile: valore prudente */ }
+  const limitUsd = settings.max_daily_loss_eur * eurUsd;
+  const loss = eq0 - snap.equity;
+  if (loss < limitUsd) return false;
+  const day = romeDay(d.now());
+  if (await once(d, `dailyloss:${day}`)) {
+    await d.store.logEvent("daily_loss_halt", { loss_usd: Math.round(loss), limit_eur: settings.max_daily_loss_eur });
+    await notify(d, `🛑 <b>Limite di perdita giornaliera raggiunto</b>\nPerdita oggi: ${Math.round(loss)} $ (limite ${settings.max_daily_loss_eur} €). Nuovi acquisti bloccati fino a domani; stop-loss e uscite restano attivi.`);
+  }
+  return true;
 }
 
 export interface TickResult { session: string; did: string[]; skipped?: string }

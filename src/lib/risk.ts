@@ -55,6 +55,13 @@ export function validateSettings(s: Settings): string[] {
   if (!(Number.isInteger(s.rotation_count) && s.rotation_count >= 0 && s.rotation_count <= 200)) e.push("rotazione: numero di titoli tra 0 (tutti) e 200");
   if (!(Number.isInteger(s.rotation_interval_min) && s.rotation_interval_min >= 5 && s.rotation_interval_min <= 480)) e.push("rotazione: intervallo tra 5 e 480 minuti");
   if (!(s.rotation_target_pct > 0 && s.rotation_target_pct <= 50)) e.push("rotazione: guadagno obiettivo tra 0 e 50%");
+  if (!(typeof s.min_reward_risk === "number" && s.min_reward_risk >= 0 && s.min_reward_risk <= 20)) e.push("rapporto guadagno/perdita minimo tra 0 e 20");
+  else if (s.min_reward_risk > 0 && s.stop_loss_pct > 0) {
+    const need = s.stop_loss_pct * s.min_reward_risk;
+    if (s.rotation_target_pct + 1e-9 < need) e.push(`rotazione: il guadagno obiettivo (${s.rotation_target_pct}%) deve essere almeno ${need}% (${s.min_reward_risk} volte la perdita massima ${s.stop_loss_pct}%)`);
+    if (s.take_profit_pct > 0 && s.take_profit_pct + 1e-9 < need) e.push(`la soglia di guadagno (${s.take_profit_pct}%) deve essere almeno ${need}% (${s.min_reward_risk} volte la perdita massima ${s.stop_loss_pct}%)`);
+  }
+  if (!(typeof s.max_daily_loss_eur === "number" && s.max_daily_loss_eur >= 0 && s.max_daily_loss_eur <= 1e7)) e.push("perdita giornaliera massima non valida");
   if (!(Number.isInteger(s.scan_interval_min) && (s.scan_interval_min === 0 || (s.scan_interval_min >= 5 && s.scan_interval_min <= 240)))) e.push("intervallo di scansione: 0 oppure tra 5 e 240 minuti");
   const okTimes = (a: unknown) => Array.isArray(a) && a.every((t) => typeof t === "string" && /^([01]?\d|2[0-3]):[0-5]\d$/.test(t));
   if (!okTimes(s.scan_times) || !okTimes(s.scan_times_eu)) e.push("orari scansione non validi (HH:MM)");

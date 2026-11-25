@@ -137,7 +137,7 @@ describe("rotazione: i migliori titoli \"acquisto\" dell'Analisi, venduti al +1%
     now = NOON;
     await seed([["A1", 1, 5, "buy"], ["A2", 2, 9, "buy"], ["A3", 3, 7, "buy"], ["A4", 4, 6, "buy"], ["A5", 5, 8, "buy"], ["A6", 6, 4, "buy"], ["A7", 7, 3, "buy"], ["N1", 8, 9, "neutral"]]);
     store.watch.delete("AAA");
-    store.settings = { ...store.settings, max_daily_invest_usd: 10000, max_position_usd: 600, max_open_positions: 100 };
+    store.settings = { ...store.settings, max_daily_invest_usd: 10000, max_position_usd: 600, max_open_positions: 100, rotation_target_pct: 1 };
   });
   it("compra i primi 5 per potenzialita' (solo giudizio acquisto), avvisa su Telegram e non ripete nella stessa ora", async () => {
     await runRotation(d);
@@ -155,6 +155,17 @@ describe("rotazione: i migliori titoli \"acquisto\" dell'Analisi, venduti al +1%
     expect(sent().join("\n")).toMatch(/Venduto/);
     await guardPositions(d);
     expect(eto.closed).toEqual(["p1"]);
+  });
+  it("il limite di perdita giornaliera blocca i nuovi acquisti e avvisa una sola volta", async () => {
+    store.settings = { ...store.settings, max_daily_loss_eur: 1000 };
+    await store.kvSet("equity_open", { day: "2026-07-16", equity: 1e9 }); // patrimonio di inizio giornata molto piu' alto: perdita oltre il limite
+    await runRotation(d);
+    expect(eto.opened.length).toBe(0);
+    expect(sent().join("\n")).toMatch(/Limite di perdita giornaliera/);
+    now = new Date(NOON.getTime() + 61 * 60_000);
+    await runRotation(d);
+    expect(eto.opened.length).toBe(0);
+    expect(sent().filter((m) => /Limite di perdita giornaliera/.test(m)).length).toBe(1);
   });
   it("dopo 60 minuti ripete il ciclo e non ricompra i titoli gia' in portafoglio", async () => {
     await runRotation(d);
